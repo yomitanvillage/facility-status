@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>草木資源化施設 管理者画面</title>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+    import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+    // ============================================================
+    // ★ ここにご自身のFirebase設定を貼り付けてください
+    // ============================================================
+    const firebaseConfig = {
+      apiKey:            "YOUR_API_KEY",
+      authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
+      databaseURL:       "https://YOUR_PROJECT_ID-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId:         "YOUR_PROJECT_ID",
+      storageBucket:     "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+      appId:             "YOUR_APP_ID"
+    };
+    // ============================================================
+
+    const app  = initializeApp(firebaseConfig);
+    const db   = getDatabase(app);
+    const auth = getAuth(app);
+    const statusRef = ref(db, "facility/status");
+
+    // ──── 認証状態の監視 ────
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        document.getElementById("user-email").textContent = user.email;
+        showPanel();
+        loadCurrentStatus();
+      } else {
+        showLogin();
+      }
+    });
+
+    // ──── ログイン ────
+    window.doLogin = async () => {
+      const email = document.getElementById("email-input").value.trim();
+      const pw    = document.getElementById("pw-input").value;
+      const errEl = document.getElementById("login-error");
+      errEl.style.display = "none";
+      const btn = document.getElementById("login-btn");
+      btn.disabled = true;
+      btn.textContent = "ログイン中...";
+      try {
+        await signInWithEmailAndPassword(auth, email, pw);
+      } catch (e) {
+        errEl.textContent = "メールアドレスまたはパスワードが違います";
+        errEl.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "ログイン";
+      }
+    };
+
+    // ──── ログアウト ────
+    window.doLogout = async () => {
+      await signOut(auth);
+    };
+
+    // ──── 現在のステータスを読み込む ────
+    function loadCurrentStatus() {
+      onValue(statusRef, (snapshot) => {
+        const data = snapshot.val() || { status: "open" };
+        selectStatus(data.status);
+        document.getElementById("reason-input").value = data.reason || "";
+        document.getElementById("reopen-input").value  = data.reopen  || "";
+        renderCurrentBadge(data);
+      }, { onlyOnce: true });
+    }
+
+    // ──── ステータス更新 ────
+    window.doUpdate = async () => {
+      const status = window._selectedStatus || "open";
+      const reason = document.getElementById("reason-input").value.trim();
+      const reopen = document.getElementById("reopen-input").value;
+      const btn    = document.getElementById("update-btn");
+      btn.disabled = true;
+      btn.textContent = "更新中...";
+      try {
+        await set(statusRef, {
+          status,
+          reason,
+          reopen,
+          updatedAt: new Date().toISOString()
+        });
+        showToast("ステータスを更新しました ✓");
+        renderCurrentBadge({ status, reason, reopen });
+      } catch (e) {
+        showToast("更新に失敗しました。権限を確認してください。");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "ステータスを更新する";
+      }
+    };
+
+    window.selectStatus = selectStatus;
+    function selectStatus(s) {
+      window._selectedStatus = s;
+      document.getElementById("btn-open").className   = "radio-btn" + (s === "open"   ? " sel-open"   : "");
+      document.getElementById("btn-closed").className = "radio-btn" + (s === "closed" ? " sel-closed" : "");
+      document.getElementById("closed-fields").style.display = s === "closed" ? "block" : "none";
+    }
+
+    function renderCurrentBadge(data) {
+      const badge = document.getElementById("current-badge");
+      const isOpen = data.status === "open";
+      badge.textContent = isOpen ? "現在：稼働中" : "現在：停止中";
+      badge.className = "current-badge " + (isOpen ? "badge-open" : "badge-closed");
+    }
+
+    function showPanel() {
+      document.getElementById("login-section").style.display = "none";
+      document.getElementById("panel-section").style.display = "block";
+    }
+    function showLogin() {
+      document.getElementById("login-section").style.display = "block";
+      document.getElementById("panel-section").style.display = "none";
+      document.getElementById("pw-input").value    = "";
+      document.getElementById("email-input").value = "";
+      const btn = document.getElementById("login-btn");
+      btn.disabled = false;
+      btn.textContent = "ログイン";
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 3000);
+    }
+
+    // Enterキーでログイン
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && document.getElementById("login-section").style.display !== "none") {
+        window.doLogin();
+      }
+    });
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif;
+      background: #f0f4f0;
+      color: #1a1a1a;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1b4332;
+      color: #fff;
+      padding: 14px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-badge {
+      font-size: 11px;
+      background: rgba(255,255,255,0.2);
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    .app { max-width: 480px; margin: 0 auto; padding: 20px 16px; }
+
+    /* ログイン */
+    .login-box {
+      background: #fff;
+      border: 1px solid #d0e0d5;
+      border-radius: 14px;
+      padding: 28px 24px;
+      margin-top: 8px;
+    }
+    .login-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1b4332;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    .form-label { font-size: 12px; color: #666; margin-bottom: 6px; display: block; }
+    input[type="email"], input[type="password"] {
+      width: 100%; padding: 11px 14px; font-size: 15px;
+      border: 1px solid #ccc; border-radius: 8px; background: #fafafa;
+      font-family: inherit; margin-bottom: 14px; color: #1a1a1a;
+    }
+    input:focus { outline: none; border-color: #2d6a4f; }
+
+    .login-error {
+      font-size: 13px; color: #c0392b;
+      margin-top: -10px; margin-bottom: 12px;
+      padding: 8px 12px; background: #fff0f0;
+      border-radius: 6px; border: 1px solid #f4a0a0;
+    }
+
+    /* 管理パネル */
+    .user-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      background: #fff; border: 1px solid #d0e0d5; border-radius: 10px;
+      padding: 10px 16px; margin-bottom: 16px; font-size: 13px; color: #555;
+    }
+    #user-email { font-weight: 600; color: #1b4332; }
+
+    .current-badge {
+      display: inline-block; padding: 4px 14px;
+      border-radius: 20px; font-size: 13px; font-weight: 600;
+      margin-bottom: 16px;
+    }
+    .badge-open   { background: #d8f3dc; color: #1b4332; }
+    .badge-closed { background: #ffe0e0; color: #7f1d1d; }
+
+    .panel-box {
+      background: #fff;
+      border: 1px solid #d0e0d5;
+      border-radius: 14px;
+      padding: 24px 20px;
+    }
+    .section-label {
+      font-size: 12px; font-weight: 600; color: #555;
+      letter-spacing: 0.05em; margin-bottom: 10px;
+    }
+
+    .radio-group { display: flex; gap: 10px; margin-bottom: 20px; }
+    .radio-btn {
+      flex: 1; padding: 16px 8px; border: 1px solid #ccc;
+      border-radius: 10px; background: #fff;
+      font-size: 15px; cursor: pointer; text-align: center;
+      font-family: inherit; transition: all 0.15s;
+    }
+    .radio-btn:hover  { background: #f5f5f5; }
+    .radio-btn.sel-open   { background: #d8f3dc; border-color: #52b788; color: #1b4332; font-weight: 700; }
+    .radio-btn.sel-closed { background: #ffe0e0; border-color: #f4a0a0; color: #7f1d1d; font-weight: 700; }
+
+    .divider { border: none; border-top: 1px solid #eee; margin: 4px 0 20px; }
+
+    textarea, input[type="datetime-local"] {
+      width: 100%; padding: 11px 14px; font-size: 14px;
+      border: 1px solid #ccc; border-radius: 8px; background: #fafafa;
+      font-family: inherit; margin-bottom: 16px; color: #1a1a1a;
+    }
+    textarea { min-height: 80px; resize: vertical; }
+    textarea:focus, input[type="datetime-local"]:focus { outline: none; border-color: #2d6a4f; }
+
+    .primary-btn {
+      width: 100%; padding: 13px; border: none; border-radius: 8px;
+      background: #2d6a4f; color: #fff; font-size: 15px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: background 0.15s;
+    }
+    .primary-btn:hover    { background: #1b4332; }
+    .primary-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+    .logout-btn {
+      display: block; width: 100%; padding: 10px; margin-top: 10px;
+      background: transparent; border: 1px solid #ccc; border-radius: 8px;
+      font-size: 13px; color: #888; cursor: pointer; font-family: inherit;
+    }
+    .logout-btn:hover { background: #f5f5f5; }
+
+    /* トースト */
+    .toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+      background: #1b4332; color: #fff; font-size: 14px;
+      padding: 12px 24px; border-radius: 24px;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s;
+      white-space: nowrap; z-index: 9999;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span>🌿 草木資源化施設　管理者画面</span>
+  <span class="header-badge">管理者専用</span>
+</header>
+
+<div class="app">
+
+  <!-- ログイン -->
+  <div id="login-section">
+    <div class="login-box">
+      <div class="login-title">管理者ログイン</div>
+      <label class="form-label">メールアドレス</label>
+      <input type="email" id="email-input" placeholder="admin@example.com" />
+      <label class="form-label">パスワード</label>
+      <input type="password" id="pw-input" placeholder="パスワード" />
+      <div class="login-error" id="login-error" style="display:none;"></div>
+      <button class="primary-btn" id="login-btn" onclick="doLogin()">ログイン</button>
+    </div>
+  </div>
+
+  <!-- 管理パネル -->
+  <div id="panel-section" style="display:none;">
+    <div class="user-bar">
+      <span id="user-email"></span>
+      <button class="logout-btn" style="width:auto;margin:0;padding:4px 12px;" onclick="doLogout()">ログアウト</button>
+    </div>
+
+    <div id="current-badge" class="current-badge badge-open">現在：稼働中</div>
+
+    <div class="panel-box">
+      <div class="section-label">新しいステータスを選択</div>
+      <div class="radio-group">
+        <button class="radio-btn sel-open"  id="btn-open"   onclick="selectStatus('open')">🌿 稼働中</button>
+        <button class="radio-btn"           id="btn-closed" onclick="selectStatus('closed')">🚫 停止中</button>
+      </div>
+
+      <div id="closed-fields" style="display:none;">
+        <hr class="divider" />
+        <label class="form-label">停止理由（任意）</label>
+        <textarea id="reason-input" placeholder="例：悪天候のため本日は受付を停止します"></textarea>
+        <label class="form-label">再開予定日時（任意）</label>
+        <input type="datetime-local" id="reopen-input" />
+      </div>
+
+      <button class="primary-btn" id="update-btn" onclick="doUpdate()">
+        ステータスを更新する
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+</body>
+</html>
