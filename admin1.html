@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>草木資源化施設　管理者画面</title>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDNdtr1D4GhzQ7aWoBlAFYkTGLioPlk4io",
+  authDomain: "yomitan-facility-status.firebaseapp.com",
+  databaseURL: "https://yomitan-facility-status-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "yomitan-facility-status",
+  storageBucket: "yomitan-facility-status.firebasestorage.app",
+  messagingSenderId: "518782906626",
+  appId: "1:518782906626:web:46d3da5ec985eb6e97121b"
+};
+
+    const SERVICE_ID = "kusaki";
+    const PASSWORD   = "9214";
+
+    const db     = getDatabase(initializeApp(firebaseConfig));
+    const svcRef = ref(db, "services/" + SERVICE_ID);
+
+    let loggedIn       = false;
+    let selectedStatus = "open";
+
+    window.doLogin = () => {
+      if (document.getElementById("pw-input").value === PASSWORD) {
+        loggedIn = true;
+        document.getElementById("login-section").style.display = "none";
+        document.getElementById("panel-section").style.display = "block";
+        loadCurrent();
+      } else {
+        document.getElementById("login-error").style.display = "block";
+        document.getElementById("pw-input").value = "";
+      }
+    };
+
+    function loadCurrent() {
+      onValue(svcRef, (snap) => {
+        const d = snap.val() || { status: "open" };
+        selectStatus(d.status);
+        document.getElementById("period-input").value        = d.period        || "";
+        document.getElementById("reason-input").value        = d.reason        || "";
+        document.getElementById("notice-period-input").value = d.notice_period || "";
+        document.getElementById("notice-msg-input").value    = d.notice_msg    || "";
+        if (d.reopen) {
+          if (d.reopen_no_time === true || d.reopen_no_time === "true") {
+            document.getElementById("no-time-check").checked = true;
+            setNoTime(true);
+            document.getElementById("reopen-date").value = d.reopen.slice(0, 10);
+          } else {
+            document.getElementById("no-time-check").checked = false;
+            setNoTime(false);
+            document.getElementById("reopen-datetime").value = toLocalDatetime(d.reopen);
+          }
+        }
+        setBadge(d.status);
+      }, { onlyOnce: true });
+    }
+
+    function toLocalDatetime(isoStr) {
+      const dt = new Date(isoStr);
+      const pad = n => String(n).padStart(2, "0");
+      return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(Math.round(dt.getMinutes()/5)*5%60)}`;
+    }
+
+    window.selectStatus = (s) => {
+      selectedStatus = s;
+      ["open","notice","closed"].forEach(v => {
+        document.getElementById("btn-" + v).className =
+          "radio-btn" + (s === v ? " sel-" + v : "");
+      });
+      document.getElementById("closed-fields").style.display = s === "closed" ? "block" : "none";
+      document.getElementById("notice-fields").style.display = s === "notice" ? "block" : "none";
+    };
+
+    window.setNoTime = (checked) => {
+      document.getElementById("reopen-datetime").style.display = checked ? "none"  : "block";
+      document.getElementById("reopen-date").style.display     = checked ? "block" : "none";
+    };
+
+    window.doUpdate = async () => {
+      const btn = document.getElementById("update-btn");
+      btn.disabled = true; btn.textContent = "更新中...";
+      const noTime = document.getElementById("no-time-check").checked;
+      let reopenVal = "";
+      if (selectedStatus === "closed") {
+        reopenVal = noTime
+          ? document.getElementById("reopen-date").value
+          : (() => { const r = document.getElementById("reopen-datetime").value; return r ? new Date(r).toISOString() : ""; })();
+      }
+      try {
+        await set(svcRef, {
+          status:         selectedStatus,
+          period:         selectedStatus === "closed" ? document.getElementById("period-input").value.trim() : "",
+          reason:         selectedStatus === "closed" ? document.getElementById("reason-input").value.trim() : "",
+          reopen:         reopenVal,
+          reopen_no_time: selectedStatus === "closed" ? noTime : false,
+          notice_period:  selectedStatus === "notice" ? document.getElementById("notice-period-input").value.trim() : "",
+          notice_msg:     selectedStatus === "notice" ? document.getElementById("notice-msg-input").value.trim() : "",
+          updatedAt: new Date().toISOString()
+        });
+        setBadge(selectedStatus);
+        showToast("ステータスを更新しました ✓");
+      } catch (e) {
+        showToast("更新に失敗しました");
+      } finally {
+        btn.disabled = false; btn.textContent = "ステータスを更新する";
+      }
+    };
+
+    function setBadge(s) {
+      const b = document.getElementById("current-badge");
+      b.textContent = s === "open" ? "現在：稼働中" : "現在：停止中";
+      b.className   = "cur-badge " + (s === "open" ? "badge-open" : "badge-closed");
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg; t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 3000);
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !loggedIn) window.doLogin();
+    });
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif; background: #f0f4f0; color: #1a1a1a; min-height: 100vh; }
+    header { background: #1b4332; color: #fff; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 15px; font-weight: 700; }
+    .header-tag { font-size: 11px; background: rgba(255,255,255,0.2); padding: 3px 10px; border-radius: 20px; }
+    .app { max-width: 480px; margin: 0 auto; padding: 16px; }
+
+    .login-box { background: #fff; border: 1px solid #d0e0d5; border-radius: 14px; padding: 28px 24px; margin-top: 8px; }
+    .login-title { font-size: 16px; font-weight: 700; color: #1b4332; text-align: center; margin-bottom: 4px; }
+    .login-sub   { font-size: 13px; color: #888; text-align: center; margin-bottom: 20px; }
+    .form-label  { font-size: 12px; color: #666; margin-bottom: 6px; display: block; }
+    input[type="password"] { width: 100%; padding: 12px 14px; font-size: 22px; letter-spacing: 8px; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; margin-bottom: 12px; background: #fafafa; text-align: center; }
+    input[type="password"]:focus { outline: none; border-color: #2d6a4f; }
+    .login-error { font-size: 13px; color: #c0392b; background: #fff0f0; border: 1px solid #f4a0a0; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+
+    .panel-card { background: #fff; border: 1px solid #d0e0d5; border-radius: 14px; padding: 20px 18px; }
+    .panel-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+    .panel-icon  { font-size: 22px; }
+    .panel-title { font-size: 15px; font-weight: 700; flex: 1; }
+    .cur-badge   { font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; }
+    .badge-open   { background: #d8f3dc; color: #1b4332; }
+    .badge-closed { background: #ffe0e0; color: #7f1d1d; }
+
+    .section-label { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 8px; }
+    .radio-group { display: flex; gap: 8px; margin-bottom: 16px; }
+    .radio-btn { flex: 1; padding: 14px 8px; border: 1px solid #ccc; border-radius: 10px; background: #fff; font-size: 15px; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.15s; }
+    .radio-btn:hover { background: #f5f5f5; }
+    .radio-btn.sel-open   { background: #d8f3dc; border-color: #52b788; color: #1b4332; font-weight: 700; }
+    .radio-btn.sel-closed { background: #ffe0e0; border-color: #f4a0a0; color: #7f1d1d; font-weight: 700; }
+    .radio-btn.sel-notice { background: #fef3dc; border-color: #e8b84b; color: #7a4f00; font-weight: 700; }
+    .no-time-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+
+    .divider { border: none; border-top: 1px solid #eee; margin: 4px 0 16px; }
+    input[type="text"], textarea, input[type="datetime-local"] { width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #ccc; border-radius: 8px; background: #fafafa; font-family: inherit; margin-bottom: 12px; color: #1a1a1a; }
+    textarea { min-height: 76px; resize: vertical; }
+    input[type="text"]:focus, textarea:focus, input[type="datetime-local"]:focus { outline: none; border-color: #2d6a4f; }
+
+    .primary-btn { width: 100%; padding: 13px; border: none; border-radius: 8px; background: #2d6a4f; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+    .primary-btn:hover    { background: #1b4332; }
+    .primary-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+    .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1b4332; color: #fff; font-size: 14px; padding: 12px 24px; border-radius: 24px; opacity: 0; pointer-events: none; transition: opacity 0.3s; white-space: nowrap; z-index: 9999; }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🌿 草木資源化施設　管理者画面</h1>
+  <span class="header-tag">管理者専用</span>
+</header>
+
+<div class="app">
+  <div id="login-section">
+    <div class="login-box">
+      <div class="login-title">管理者ログイン</div>
+      <div class="login-sub">草木資源化施設 担当者専用</div>
+      <label class="form-label">パスワード</label>
+      <input type="password" id="pw-input" placeholder="・・・・" maxlength="10" />
+      <div class="login-error" id="login-error" style="display:none;">パスワードが違います</div>
+      <button class="primary-btn" onclick="doLogin()">ログイン</button>
+    </div>
+  </div>
+
+  <div id="panel-section" style="display:none;">
+    <div class="panel-card">
+      <div class="panel-header">
+        <span class="panel-icon">🌿</span>
+        <span class="panel-title">草木資源化施設</span>
+        <span class="cur-badge badge-open" id="current-badge">現在：確認中</span>
+      </div>
+      <div class="section-label">新しいステータスを選択</div>
+      <div class="radio-group">
+        <button class="radio-btn sel-open"  id="btn-open"   onclick="selectStatus('open')">🌿 稼働中</button>
+        <button class="radio-btn"           id="btn-notice" onclick="selectStatus('notice')">📢 予告</button>
+        <button class="radio-btn"           id="btn-closed" onclick="selectStatus('closed')">🚫 停止中</button>
+      </div>
+
+      <div id="notice-fields" style="display:none;">
+        <hr class="divider" />
+        <label class="form-label">予告期間（任意）</label>
+        <input type="text" id="notice-period-input" placeholder="例：4月25日（金）終日" />
+        <label class="form-label">予告メッセージ（任意）</label>
+        <textarea id="notice-msg-input" placeholder="例：雨天予報のため翌日停止の可能性があります"></textarea>
+      </div>
+
+      <div id="closed-fields" style="display:none;">
+        <hr class="divider" />
+        <label class="form-label">停止期間（任意）</label>
+        <input type="text" id="period-input" placeholder="例：4月20日（日）終日" />
+        <label class="form-label">停止理由（任意）</label>
+        <textarea id="reason-input" placeholder="例：雨天のため搬入不可"></textarea>
+        <label class="form-label">再開予定（任意）</label>
+        <div class="no-time-row">
+          <input type="checkbox" id="no-time-check" onchange="setNoTime(this.checked)" />
+          <label for="no-time-check" style="font-size:13px;color:#555;">時間指定なし（日付のみ）</label>
+        </div>
+        <input type="datetime-local" id="reopen-datetime" step="300" style="margin-bottom:12px;" />
+        <input type="date"           id="reopen-date"     style="display:none;margin-bottom:12px;" />
+      </div>
+      <button class="primary-btn" id="update-btn" onclick="doUpdate()">ステータスを更新する</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+</body>
+</html>
