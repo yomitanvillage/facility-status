@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>コンビニ交付　管理者画面</title>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    // ============================================================
+    // ★ ここにご自身のFirebase設定を貼り付けてください
+    // ============================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyDNdtr1D4GhzQ7aWoBlAFYkTGLioPlk4io",
+  authDomain: "yomitan-facility-status.firebaseapp.com",
+  databaseURL: "https://yomitan-facility-status-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "yomitan-facility-status",
+  storageBucket: "yomitan-facility-status.firebasestorage.app",
+  messagingSenderId: "518782906626",
+  appId: "1:518782906626:web:66afeb51b72cf4c997121b"
+};
+    // ============================================================
+
+    const SERVICE_ID = "conveni";
+    const PASSWORD   = "9207";
+
+    const db     = getDatabase(initializeApp(firebaseConfig));
+    const svcRef = ref(db, "services/" + SERVICE_ID);
+
+    let loggedIn = false;
+    let selectedStatus = "open";
+
+    // ──── ログイン ────
+    window.doLogin = () => {
+      const val = document.getElementById("pw-input").value;
+      if (val === PASSWORD) {
+        loggedIn = true;
+        document.getElementById("login-section").style.display = "none";
+        document.getElementById("panel-section").style.display = "block";
+        loadCurrentStatus();
+      } else {
+        document.getElementById("login-error").style.display = "block";
+        document.getElementById("pw-input").value = "";
+      }
+    };
+
+    function loadCurrentStatus() {
+      onValue(svcRef, (snap) => {
+        const d = snap.val() || { status: "open" };
+        selectStatus(d.status);
+        document.getElementById("period-input").value = d.period || "";
+        document.getElementById("reason-input").value = d.reason || "";
+        document.getElementById("reopen-input").value = d.reopen || "";
+        updateCurrentBadge(d.status);
+      }, { onlyOnce: true });
+    }
+
+    window.selectStatus = (s) => {
+      selectedStatus = s;
+      document.getElementById("btn-open").className   = "radio-btn" + (s === "open"   ? " sel-open"   : "");
+      document.getElementById("btn-closed").className = "radio-btn" + (s === "closed" ? " sel-closed" : "");
+      document.getElementById("closed-fields").style.display = s === "closed" ? "block" : "none";
+    };
+
+    window.doUpdate = async () => {
+      const btn = document.getElementById("update-btn");
+      btn.disabled = true;
+      btn.textContent = "更新中...";
+      try {
+        await set(svcRef, {
+          status:    selectedStatus,
+          period:    selectedStatus === "closed" ? document.getElementById("period-input").value.trim() : "",
+          reason:    selectedStatus === "closed" ? document.getElementById("reason-input").value.trim() : "",
+          reopen:    selectedStatus === "closed" ? document.getElementById("reopen-input").value : "",
+          updatedAt: new Date().toISOString()
+        });
+        updateCurrentBadge(selectedStatus);
+        showToast("ステータスを更新しました ✓");
+      } catch (e) {
+        showToast("更新に失敗しました");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "ステータスを更新する";
+      }
+    };
+
+    function updateCurrentBadge(status) {
+      const badge = document.getElementById("current-badge");
+      badge.textContent = status === "open" ? "現在：稼働中" : "現在：停止中";
+      badge.className   = "cur-badge " + (status === "open" ? "badge-open" : "badge-closed");
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg; t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 3000);
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !loggedIn) window.doLogin();
+    });
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif;
+      background: #f0f2f8; color: #1a1a1a; min-height: 100vh;
+    }
+    header {
+      background: #1a3a6b; color: #fff;
+      padding: 14px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 15px; font-weight: 700; }
+    .header-tag {
+      font-size: 11px; background: rgba(255,255,255,0.2);
+      padding: 3px 10px; border-radius: 20px;
+    }
+    .app { max-width: 480px; margin: 0 auto; padding: 16px; }
+
+    /* ログイン */
+    .login-box {
+      background: #fff; border: 1px solid #c8d5e8;
+      border-radius: 14px; padding: 28px 24px; margin-top: 8px;
+    }
+    .login-title { font-size: 16px; font-weight: 700; color: #1a3a6b; text-align: center; margin-bottom: 6px; }
+    .login-sub   { font-size: 13px; color: #888; text-align: center; margin-bottom: 20px; }
+    .form-label  { font-size: 12px; color: #666; margin-bottom: 6px; display: block; }
+    input[type="password"] {
+      width: 100%; padding: 12px 14px; font-size: 20px; letter-spacing: 6px;
+      border: 1px solid #ccc; border-radius: 8px; font-family: inherit;
+      margin-bottom: 12px; color: #1a1a1a; background: #fafafa; text-align: center;
+    }
+    input[type="password"]:focus { outline: none; border-color: #1a3a6b; }
+    .login-error {
+      font-size: 13px; color: #c0392b;
+      background: #fff0f0; border: 1px solid #f4a0a0;
+      border-radius: 6px; padding: 8px 12px; margin-bottom: 12px;
+    }
+
+    /* パネル */
+    .panel-card {
+      background: #fff; border: 1px solid #c8d5e8;
+      border-radius: 14px; padding: 20px 18px; margin-bottom: 14px;
+    }
+    .panel-header {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+    }
+    .panel-icon  { font-size: 22px; }
+    .panel-title { font-size: 15px; font-weight: 700; flex: 1; }
+    .cur-badge   { font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; }
+    .badge-open   { background: #d8f3dc; color: #1b4332; }
+    .badge-closed { background: #ffe0e0; color: #7f1d1d; }
+
+    .section-label { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 8px; }
+    .radio-group { display: flex; gap: 8px; margin-bottom: 16px; }
+    .radio-btn {
+      flex: 1; padding: 14px 8px; border: 1px solid #ccc;
+      border-radius: 10px; background: #fff; font-size: 15px;
+      cursor: pointer; text-align: center; font-family: inherit; transition: all 0.15s;
+    }
+    .radio-btn:hover  { background: #f5f5f5; }
+    .radio-btn.sel-open   { background: #d8f3dc; border-color: #52b788; color: #1b4332; font-weight: 700; }
+    .radio-btn.sel-closed { background: #ffe0e0; border-color: #f4a0a0; color: #7f1d1d; font-weight: 700; }
+
+    .divider { border: none; border-top: 1px solid #eee; margin: 4px 0 16px; }
+    .form-label { font-size: 12px; color: #666; margin-bottom: 6px; display: block; margin-top: 2px; }
+
+    input[type="text"], textarea, input[type="datetime-local"] {
+      width: 100%; padding: 10px 12px; font-size: 14px;
+      border: 1px solid #ccc; border-radius: 8px; background: #fafafa;
+      font-family: inherit; margin-bottom: 12px; color: #1a1a1a;
+    }
+    textarea { min-height: 76px; resize: vertical; }
+    input[type="text"]:focus,
+    textarea:focus,
+    input[type="datetime-local"]:focus { outline: none; border-color: #1a3a6b; }
+
+    .primary-btn {
+      width: 100%; padding: 13px; border: none; border-radius: 8px;
+      background: #1a3a6b; color: #fff; font-size: 15px; font-weight: 700;
+      cursor: pointer; font-family: inherit; transition: background 0.15s;
+    }
+    .primary-btn:hover    { background: #122a52; }
+    .primary-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+    .toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+      background: #1a3a6b; color: #fff; font-size: 14px;
+      padding: 12px 24px; border-radius: 24px;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s;
+      white-space: nowrap; z-index: 9999;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🏛️ コンビニ交付　管理者画面</h1>
+  <span class="header-tag">管理者専用</span>
+</header>
+
+<div class="app">
+
+  <!-- ログイン -->
+  <div id="login-section">
+    <div class="login-box">
+      <div class="login-title">管理者ログイン</div>
+      <div class="login-sub">コンビニ交付 担当者専用</div>
+      <label class="form-label">パスワード</label>
+      <input type="password" id="pw-input" placeholder="****" maxlength="10" />
+      <div class="login-error" id="login-error" style="display:none;">
+        パスワードが違います
+      </div>
+      <button class="primary-btn" onclick="doLogin()">ログイン</button>
+    </div>
+  </div>
+
+  <!-- 管理パネル -->
+  <div id="panel-section" style="display:none;">
+    <div class="panel-card">
+      <div class="panel-header">
+        <span class="panel-icon">🏛️</span>
+        <span class="panel-title">コンビニ交付</span>
+        <span class="cur-badge badge-open" id="current-badge">現在：確認中</span>
+      </div>
+
+      <div class="section-label">新しいステータスを選択</div>
+      <div class="radio-group">
+        <button class="radio-btn sel-open"  id="btn-open"   onclick="selectStatus('open')">🌿 稼働中</button>
+        <button class="radio-btn"           id="btn-closed" onclick="selectStatus('closed')">🚫 停止中</button>
+      </div>
+
+      <div id="closed-fields" style="display:none;">
+        <hr class="divider" />
+        <label class="form-label">停止期間（任意）</label>
+        <input type="text" id="period-input" placeholder="例：4月20日（日）終日" />
+        <label class="form-label">停止理由（任意）</label>
+        <textarea id="reason-input" placeholder="例：システムメンテナンスのため停止中"></textarea>
+        <label class="form-label">再開予定日時（任意）</label>
+        <input type="datetime-local" id="reopen-input" />
+      </div>
+
+      <button class="primary-btn" id="update-btn" onclick="doUpdate()">
+        ステータスを更新する
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+</body>
+</html>
