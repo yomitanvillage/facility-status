@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>草木資源化施設　管理者画面</title>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDNdtr1D4GhzQ7aWoBlAFYkTGLioPlk4io",
+      authDomain: "yomitan-facility-status.firebaseapp.com",
+      databaseURL: "https://yomitan-facility-status-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "yomitan-facility-status",
+      storageBucket: "yomitan-facility-status.firebasestorage.app",
+      messagingSenderId: "518782906626",
+      appId: "1:518782906626:web:46d3da5ec985eb6e97121b"
+    };
+
+    const SERVICE_ID  = "kusaki";
+    const PASSWORD    = "9214";
+    const db          = getDatabase(initializeApp(firebaseConfig));
+    const svcRef      = ref(db, "services/" + SERVICE_ID);
+    const schRef      = ref(db, "schedules/" + SERVICE_ID);
+
+    let loggedIn       = false;
+    let selectedStatus = "open";
+
+    // ──── ログイン ────
+    window.doLogin = () => {
+      if (document.getElementById("pw-input").value === PASSWORD) {
+        loggedIn = true;
+        document.getElementById("login-section").style.display = "none";
+        document.getElementById("panel-section").style.display = "block";
+        loadCurrent();
+        loadSchedule();
+      } else {
+        document.getElementById("login-error").style.display = "block";
+        document.getElementById("pw-input").value = "";
+      }
+    };
+
+    // ──── 現在ステータス読み込み ────
+    function loadCurrent() {
+      onValue(svcRef, (snap) => {
+        const d = snap.val() || { status: "open" };
+        selectStatus(d.status);
+        document.getElementById("period-input").value        = d.period        || "";
+        document.getElementById("reason-input").value        = d.reason        || "";
+        document.getElementById("notice-period-input").value = d.notice_period || "";
+        document.getElementById("notice-msg-input").value    = d.notice_msg    || "";
+        const mode = d.reopen_mode || "none";
+        setReopenMode(mode);
+        if (mode === "datetime" && d.reopen) document.getElementById("reopen-datetime").value = toLocal(d.reopen);
+        if (mode === "dateonly"  && d.reopen) document.getElementById("reopen-date").value     = d.reopen.slice(0, 10);
+        setBadge(d.status);
+      }, { onlyOnce: true });
+    }
+
+    // ──── スケジュール読み込み・監視 ────
+    function loadSchedule() {
+      onValue(schRef, (snap) => {
+        renderScheduleStatus(snap.val());
+      });
+    }
+
+    function renderScheduleStatus(s) {
+      const box = document.getElementById("schedule-active-box");
+      if (!s || !s.active) { box.style.display = "none"; return; }
+      box.style.display = "block";
+      let html = "";
+      if (s.noticeAt)  html += `<div class="sch-row"><span class="sch-dot dot-notice">📢</span><span>予告開始：${fmtDt(s.noticeAt)}</span></div>`;
+      if (s.closedAt)  html += `<div class="sch-row"><span class="sch-dot dot-closed">🚫</span><span>停止開始：${fmtDt(s.closedAt)}</span></div>`;
+      if (s.reopenAt)  html += `<div class="sch-row"><span class="sch-dot dot-open">🌿</span><span>復旧予定：${fmtDt(s.reopenAt)}</span></div>`;
+      if (s.noticeMsg) html += `<div class="sch-memo">予告文：${esc(s.noticeMsg)}</div>`;
+      if (s.reason)    html += `<div class="sch-memo">停止理由：${esc(s.reason)}</div>`;
+      document.getElementById("schedule-active-content").innerHTML = html;
+    }
+
+    function fmtDt(iso) {
+      const dt = new Date(iso);
+      return dt.toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" })
+        + " " + dt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+    }
+
+    // ──── スケジュール登録 ────
+    window.registerSchedule = async () => {
+      const noticeAt  = document.getElementById("sch-notice-at").value;
+      const closedAt  = document.getElementById("sch-closed-at").value;
+      const reopenAt  = document.getElementById("sch-reopen-at").value;
+      const noticeMsg = document.getElementById("sch-notice-msg").value.trim();
+      const reason    = document.getElementById("sch-reason").value.trim();
+
+      if (!closedAt || !reopenAt) { showToast("停止開始日時と復旧日時は必須です"); return; }
+      if (noticeAt && new Date(noticeAt) >= new Date(closedAt)) { showToast("予告開始は停止開始より前の日時にしてください"); return; }
+      if (new Date(closedAt) >= new Date(reopenAt)) { showToast("復旧日時は停止開始より後の日時にしてください"); return; }
+
+      const btn = document.getElementById("sch-register-btn");
+      btn.disabled = true; btn.textContent = "登録中...";
+      try {
+        await set(schRef, {
+          active:    true,
+          noticeAt:  noticeAt ? new Date(noticeAt).toISOString() : "",
+          closedAt:  new Date(closedAt).toISOString(),
+          reopenAt:  new Date(reopenAt).toISOString(),
+          noticeMsg, reason,
+          createdAt: new Date().toISOString()
+        });
+        showToast("スケジュールを登録しました ✓");
+        toggleScheduleForm(false);
+      } catch (e) { showToast("登録に失敗しました"); }
+      finally { btn.disabled = false; btn.textContent = "スケジュールを登録する"; }
+    };
+
+    // ──── スケジュールキャンセル ────
+    window.cancelSchedule = async () => {
+      if (!confirm("登録中のスケジュールをキャンセルしますか？\n現在のステータスはそのまま維持されます。")) return;
+      try {
+        await set(schRef, { active: false });
+        showToast("スケジュールをキャンセルしました");
+      } catch (e) { showToast("キャンセルに失敗しました"); }
+    };
+
+    // ──── フォーム開閉 ────
+    window.toggleScheduleForm = (forceOpen) => {
+      const form = document.getElementById("schedule-form");
+      const btn  = document.getElementById("sch-toggle-btn");
+      const open = forceOpen !== undefined ? forceOpen : (form.style.display === "none" || form.style.display === "");
+      form.style.display = open ? "block" : "none";
+      btn.textContent = open ? "▲ 閉じる" : "▼ スケジュールを新規登録する";
+    };
+
+    // ──── 手動ステータス操作 ────
+    window.selectStatus = (s) => {
+      selectedStatus = s;
+      ["open","notice","closed"].forEach(v =>
+        document.getElementById("btn-" + v).className = "radio-btn" + (s === v ? " sel-" + v : "")
+      );
+      document.getElementById("closed-fields").style.display = s === "closed" ? "block" : "none";
+      document.getElementById("notice-fields").style.display = s === "notice" ? "block" : "none";
+    };
+
+    window.setReopenMode = (mode) => {
+      document.getElementById("reopen-mode").value = mode;
+      document.getElementById("reopen-datetime-wrap").style.display = mode === "datetime"  ? "block" : "none";
+      document.getElementById("reopen-date-wrap").style.display     = mode === "dateonly"  ? "block" : "none";
+      document.getElementById("reopen-undecided-msg").style.display = mode === "undecided" ? "block" : "none";
+      ["none","datetime","dateonly","undecided"].forEach(m => {
+        const el = document.getElementById("reopen-btn-" + m);
+        if (el) el.className = "reopen-btn" + (mode === m ? " reopen-selected" : "");
+      });
+    };
+
+    window.doUpdate = async () => {
+      const btn = document.getElementById("update-btn");
+      btn.disabled = true; btn.textContent = "更新中...";
+      const mode = document.getElementById("reopen-mode").value;
+      let reopenVal = "", reopenMode = "none";
+      if (selectedStatus === "closed") {
+        if (mode === "datetime") {
+          const raw = document.getElementById("reopen-datetime").value;
+          reopenVal = raw ? new Date(raw).toISOString() : ""; reopenMode = raw ? "datetime" : "none";
+        } else if (mode === "dateonly") {
+          reopenVal = document.getElementById("reopen-date").value || ""; reopenMode = reopenVal ? "dateonly" : "none";
+        } else if (mode === "undecided") { reopenMode = "undecided"; }
+      }
+      try {
+        await set(svcRef, {
+          status:        selectedStatus,
+          period:        selectedStatus === "closed" ? document.getElementById("period-input").value.trim()        : "",
+          reason:        selectedStatus === "closed" ? document.getElementById("reason-input").value.trim()        : "",
+          reopen: reopenVal, reopen_mode: selectedStatus === "closed" ? reopenMode : "none",
+          notice_period: selectedStatus === "notice" ? document.getElementById("notice-period-input").value.trim() : "",
+          notice_msg:    selectedStatus === "notice" ? document.getElementById("notice-msg-input").value.trim()    : "",
+          updatedAt: new Date().toISOString()
+        });
+        setBadge(selectedStatus);
+        showToast("ステータスを更新しました ✓");
+      } catch (e) { showToast("更新に失敗しました"); }
+      finally { btn.disabled = false; btn.textContent = "ステータスを更新する"; }
+    };
+
+    function setBadge(s) {
+      const b = document.getElementById("current-badge");
+      if (s === "open")        { b.textContent = "現在：稼働中";             b.className = "cur-badge badge-open"; }
+      else if (s === "notice") { b.textContent = "現在：稼働中（予告表示中）"; b.className = "cur-badge badge-notice"; }
+      else                     { b.textContent = "現在：停止中";             b.className = "cur-badge badge-closed"; }
+    }
+
+    function toLocal(iso) {
+      const dt = new Date(iso), pad = n => String(n).padStart(2,"0");
+      return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(Math.round(dt.getMinutes()/5)*5%60)}`;
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById("toast");
+      t.textContent = msg; t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 3000);
+    }
+
+    document.addEventListener("keydown", e => { if (e.key === "Enter" && !loggedIn) window.doLogin(); });
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif; background: #f0f4f0; color: #1a1a1a; min-height: 100vh; }
+    header { background: #1b4332; color: #fff; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 15px; font-weight: 700; }
+    .header-tag { font-size: 11px; background: rgba(255,255,255,0.2); padding: 3px 10px; border-radius: 20px; }
+    .app { max-width: 480px; margin: 0 auto; padding: 16px; }
+
+    /* ログイン */
+    .login-box { background: #fff; border: 1px solid #d0e0d5; border-radius: 14px; padding: 28px 24px; margin-top: 8px; }
+    .login-title { font-size: 16px; font-weight: 700; color: #1b4332; text-align: center; margin-bottom: 4px; }
+    .login-sub   { font-size: 13px; color: #888; text-align: center; margin-bottom: 20px; }
+    .form-label  { font-size: 12px; color: #666; margin-bottom: 6px; display: block; margin-top: 2px; }
+    input[type="password"] { width: 100%; padding: 12px 14px; font-size: 22px; letter-spacing: 8px; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; margin-bottom: 12px; background: #fafafa; text-align: center; }
+    input[type="password"]:focus { outline: none; border-color: #2d6a4f; }
+    .login-error { font-size: 13px; color: #c0392b; background: #fff0f0; border: 1px solid #f4a0a0; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+
+    /* パネル */
+    .panel-card { background: #fff; border: 1px solid #d0e0d5; border-radius: 14px; padding: 20px 18px; margin-bottom: 14px; }
+    .panel-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+    .panel-icon  { font-size: 22px; }
+    .panel-title { font-size: 15px; font-weight: 700; flex: 1; }
+    .cur-badge { font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; flex-shrink: 0; }
+    .badge-open   { background: #d8f3dc; color: #1b4332; }
+    .badge-closed { background: #ffe0e0; color: #7f1d1d; }
+    .badge-notice { background: #fef0c0; color: #7a4f00; }
+
+    .section-label { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 8px; }
+    .radio-group { display: flex; gap: 8px; margin-bottom: 16px; }
+    .radio-btn { flex: 1; padding: 14px 8px; border: 1px solid #ccc; border-radius: 10px; background: #fff; font-size: 15px; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.15s; }
+    .radio-btn:hover { background: #f5f5f5; }
+    .radio-btn.sel-open   { background: #d8f3dc; border-color: #52b788; color: #1b4332; font-weight: 700; }
+    .radio-btn.sel-closed { background: #ffe0e0; border-color: #f4a0a0; color: #7f1d1d; font-weight: 700; }
+    .radio-btn.sel-notice { background: #fef3dc; border-color: #e8b84b; color: #7a4f00; font-weight: 700; }
+
+    .divider { border: none; border-top: 1px solid #eee; margin: 4px 0 16px; }
+    input[type="text"], textarea, input[type="datetime-local"], input[type="date"] {
+      width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #ccc;
+      border-radius: 8px; background: #fafafa; font-family: inherit; margin-bottom: 12px; color: #1a1a1a;
+    }
+    textarea { min-height: 76px; resize: vertical; }
+    input[type="text"]:focus, textarea:focus,
+    input[type="datetime-local"]:focus, input[type="date"]:focus { outline: none; border-color: #2d6a4f; }
+
+    .reopen-mode-group { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+    .reopen-btn { padding: 9px 6px; border: 1px solid #ccc; border-radius: 8px; background: #fff; font-size: 12px; cursor: pointer; text-align: center; font-family: inherit; color: #555; transition: all 0.15s; }
+    .reopen-btn:hover { background: #f5f5f5; }
+    .reopen-selected { background: #e8f4ed; border-color: #52b788; color: #1b4332; font-weight: 700; }
+    .reopen-undecided-msg { font-size: 13px; color: #7a4f00; background: #fef0c0; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+    .auto-note { font-size: 12px; color: #1b4332; background: #e8f4ed; border-radius: 8px; padding: 8px 12px; margin-top: -4px; margin-bottom: 12px; line-height: 1.6; }
+
+    /* スケジュール */
+    .schedule-card { background: #fff; border: 1px solid #d0e0d5; border-radius: 14px; overflow: hidden; margin-bottom: 14px; }
+    .schedule-card-header { display: flex; align-items: center; gap: 8px; padding: 14px 18px; background: #f0f7f3; border-bottom: 1px solid #d0e0d5; }
+    .schedule-card-title { font-size: 14px; font-weight: 700; color: #1b4332; flex: 1; }
+    .sch-toggle-btn { font-size: 12px; color: #2d6a4f; background: transparent; border: 1px solid #52b788; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-family: inherit; }
+
+    /* 登録中スケジュール */
+    .schedule-active-box { padding: 14px 18px; background: #fffdf0; border-bottom: 1px solid #f0e8c0; }
+    .schedule-active-label { font-size: 11px; font-weight: 700; color: #7a4f00; background: #fef0c0; display: inline-block; padding: 2px 10px; border-radius: 20px; margin-bottom: 10px; }
+    .sch-row { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 5px; }
+    .sch-dot { font-size: 14px; flex-shrink: 0; }
+    .sch-memo { font-size: 12px; color: #666; margin-top: 6px; padding-left: 4px; }
+    .cancel-btn { width: 100%; margin-top: 10px; padding: 8px; background: #fff; border: 1px solid #f4a0a0; border-radius: 8px; color: #c0392b; font-size: 13px; cursor: pointer; font-family: inherit; }
+    .cancel-btn:hover { background: #fff0f0; }
+
+    /* スケジュールフォーム */
+    .schedule-form { padding: 16px 18px; }
+    .sch-section { font-size: 11px; font-weight: 700; color: #888; letter-spacing: 0.08em; margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+    .sch-section:first-child { margin-top: 0; }
+    .sch-optional { font-size: 11px; color: #aaa; font-weight: 400; margin-left: 4px; }
+    .sch-note { font-size: 12px; color: #555; background: #f5f5f5; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
+    .sch-auto-note { font-size: 12px; color: #1b4332; background: #e8f4ed; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
+
+    .primary-btn { width: 100%; padding: 13px; border: none; border-radius: 8px; background: #2d6a4f; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+    .primary-btn:hover    { background: #1b4332; }
+    .primary-btn:disabled { background: #aaa; cursor: not-allowed; }
+    .sch-register-btn { background: #1a3a6b; }
+    .sch-register-btn:hover { background: #122a52; }
+
+    .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1b4332; color: #fff; font-size: 14px; padding: 12px 24px; border-radius: 24px; opacity: 0; pointer-events: none; transition: opacity 0.3s; white-space: nowrap; z-index: 9999; }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>🌿 草木資源化施設　管理者画面</h1>
+  <span class="header-tag">管理者専用</span>
+</header>
+<div class="app">
+
+  <!-- ログイン -->
+  <div id="login-section">
+    <div class="login-box">
+      <div class="login-title">管理者ログイン</div>
+      <div class="login-sub">草木資源化施設 担当者専用</div>
+      <label class="form-label">パスワード</label>
+      <input type="password" id="pw-input" placeholder="・・・・" maxlength="10" />
+      <div class="login-error" id="login-error" style="display:none;">パスワードが違います</div>
+      <button class="primary-btn" onclick="doLogin()">ログイン</button>
+    </div>
+  </div>
+
+  <div id="panel-section" style="display:none;">
+
+    <!-- ═══ スケジュール設定カード ═══ -->
+    <div class="schedule-card">
+      <div class="schedule-card-header">
+        <span style="font-size:18px;">📅</span>
+        <span class="schedule-card-title">スケジュール自動切替</span>
+        <button class="sch-toggle-btn" id="sch-toggle-btn" onclick="toggleScheduleForm()">▼ スケジュールを新規登録する</button>
+      </div>
+
+      <!-- 登録中スケジュール表示 -->
+      <div id="schedule-active-box" class="schedule-active-box" style="display:none;">
+        <div class="schedule-active-label">📋 登録中のスケジュール</div>
+        <div id="schedule-active-content"></div>
+        <button class="cancel-btn" onclick="cancelSchedule()">このスケジュールをキャンセルする</button>
+      </div>
+
+      <!-- 登録フォーム -->
+      <div id="schedule-form" class="schedule-form" style="display:none;">
+        <div class="sch-note">停止開始・復旧の日時を登録すると、index.html が自動でステータスを切り替えます。予告開始は省略可能です。</div>
+
+        <div class="sch-section">📢 予告開始日時 <span class="sch-optional">（任意）</span></div>
+        <input type="datetime-local" id="sch-notice-at" step="300" />
+        <label class="form-label">予告メッセージ（任意）</label>
+        <textarea id="sch-notice-msg" placeholder="例：明日は雨天予報のため停止する可能性があります" style="min-height:60px;"></textarea>
+
+        <div class="sch-section">🚫 停止開始日時 <span style="color:#c0392b;font-size:11px;">必須</span></div>
+        <input type="datetime-local" id="sch-closed-at" step="300" />
+        <label class="form-label">停止理由（任意）</label>
+        <textarea id="sch-reason" placeholder="例：雨天のため搬入不可" style="min-height:60px;"></textarea>
+
+        <div class="sch-section">🌿 復旧日時 <span style="color:#c0392b;font-size:11px;">必須</span></div>
+        <input type="datetime-local" id="sch-reopen-at" step="300" />
+        <div class="sch-auto-note">⏱ 復旧日時を過ぎると利用者画面が自動で「稼働中」に切り替わります</div>
+
+        <button class="primary-btn sch-register-btn" id="sch-register-btn" onclick="registerSchedule()">スケジュールを登録する</button>
+      </div>
+    </div>
+
+    <!-- ═══ 手動ステータス更新カード ═══ -->
+    <div class="panel-card">
+      <div class="panel-header">
+        <span class="panel-icon">🌿</span>
+        <span class="panel-title">手動でステータスを変更</span>
+        <span class="cur-badge badge-open" id="current-badge">現在：確認中</span>
+      </div>
+      <div class="section-label">新しいステータスを選択</div>
+      <div class="radio-group">
+        <button class="radio-btn sel-open"  id="btn-open"   onclick="selectStatus('open')">🌿 稼働中</button>
+        <button class="radio-btn"           id="btn-notice" onclick="selectStatus('notice')">📢 予告</button>
+        <button class="radio-btn"           id="btn-closed" onclick="selectStatus('closed')">🚫 停止中</button>
+      </div>
+
+      <div id="notice-fields" style="display:none;">
+        <hr class="divider" />
+        <label class="form-label">予告期間（任意）</label>
+        <input type="text" id="notice-period-input" placeholder="例：4月25日（金）終日" />
+        <label class="form-label">予告メッセージ（任意）</label>
+        <textarea id="notice-msg-input" placeholder="例：雨天予報のため翌日停止の可能性があります"></textarea>
+      </div>
+
+      <div id="closed-fields" style="display:none;">
+        <hr class="divider" />
+        <label class="form-label">停止期間（任意）</label>
+        <input type="text" id="period-input" placeholder="例：4月20日（日）終日" />
+        <label class="form-label">停止理由（任意）</label>
+        <textarea id="reason-input" placeholder="例：雨天のため搬入不可"></textarea>
+        <label class="form-label">再開予定</label>
+        <div class="reopen-mode-group">
+          <button class="reopen-btn reopen-selected" id="reopen-btn-none"      onclick="setReopenMode('none')">設定しない</button>
+          <button class="reopen-btn"                 id="reopen-btn-datetime"  onclick="setReopenMode('datetime')">日時を指定（5分単位）</button>
+          <button class="reopen-btn"                 id="reopen-btn-dateonly"  onclick="setReopenMode('dateonly')">日付のみ</button>
+          <button class="reopen-btn"                 id="reopen-btn-undecided" onclick="setReopenMode('undecided')">未定</button>
+        </div>
+        <input type="hidden" id="reopen-mode" value="none" />
+        <div id="reopen-datetime-wrap" style="display:none;">
+          <input type="datetime-local" id="reopen-datetime" step="300" />
+          <div class="auto-note">⏱ 設定した日時を過ぎると、利用者画面が自動で「稼働中」に切り替わります</div>
+        </div>
+        <div id="reopen-date-wrap" style="display:none;">
+          <input type="date" id="reopen-date" />
+        </div>
+        <div id="reopen-undecided-msg" class="reopen-undecided-msg" style="display:none;">
+          復旧日時：未定　と表示されます
+        </div>
+      </div>
+
+      <button class="primary-btn" id="update-btn" onclick="doUpdate()">ステータスを更新する</button>
+    </div>
+
+  </div><!-- /panel-section -->
+</div>
+<div class="toast" id="toast"></div>
+</body>
+</html>
