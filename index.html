@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>読谷村　サービス稼働状況</title>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDNdtr1D4GhzQ7aWoBlAFYkTGLioPlk4io",
+      authDomain: "yomitan-facility-status.firebaseapp.com",
+      databaseURL: "https://yomitan-facility-status-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "yomitan-facility-status",
+      storageBucket: "yomitan-facility-status.firebasestorage.app",
+      messagingSenderId: "518782906626",
+      appId: "1:518782906626:web:46d3da5ec985eb6e97121b"
+    };
+
+    const db = getDatabase(initializeApp(firebaseConfig));
+    const serviceIds = ["kusaki", "conveni"];
+    const latestData = {};
+
+    // ──── 各サービスをリアルタイム購読 ────
+    serviceIds.forEach(id => {
+      onValue(ref(db, "services/" + id), (snap) => {
+        const d = snap.val() || { status: "open" };
+        latestData[id] = d;
+        renderStatus(id, d);
+      });
+    });
+
+    // ──── 60秒ごと：スケジュール & 手動再開予定の両方をチェック ────
+    async function checkAll() {
+      const now = Date.now();
+      for (const id of serviceIds) {
+
+        // ① スケジュールチェック（優先）
+        const schSnap = await new Promise(resolve =>
+          onValue(ref(db, "schedules/" + id), resolve, { onlyOnce: true })
+        );
+        const sch = schSnap.val();
+        if (sch && sch.active) {
+          // 復旧日時を過ぎた → 稼働中に戻してスケジュール終了
+          if (sch.reopenAt && now >= new Date(sch.reopenAt).getTime()) {
+            try {
+              await set(ref(db, "services/" + id), {
+                status: "open", period: "", reason: "", reopen: "", reopen_mode: "none",
+                notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
+              });
+              await set(ref(db, "schedules/" + id), { active: false });
+            } catch (e) { console.warn("スケジュール復旧失敗:", id, e); }
+            continue;
+          }
+          // 停止開始日時を過ぎた → 停止中に切替
+          if (sch.closedAt && now >= new Date(sch.closedAt).getTime()) {
+            const d = latestData[id];
+            if (d && d.status !== "closed") {
+              try {
+                await set(ref(db, "services/" + id), {
+                  status: "closed", period: "", reason: sch.reason || "",
+                  reopen: sch.reopenAt || "", reopen_mode: sch.reopenAt ? "datetime" : "none",
+                  notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
+                });
+              } catch (e) { console.warn("スケジュール停止失敗:", id, e); }
+            }
+            continue;
+          }
+          // 予告開始日時を過ぎた → 予告に切替
+          if (sch.noticeAt && now >= new Date(sch.noticeAt).getTime()) {
+            const d = latestData[id];
+            if (d && d.status !== "notice" && d.status !== "closed") {
+              try {
+                await set(ref(db, "services/" + id), {
+                  status: "notice", period: "", reason: "",
+                  reopen: "", reopen_mode: "none",
+                  notice_period: "", notice_msg: sch.noticeMsg || "",
+                  updatedAt: new Date().toISOString()
+                });
+              } catch (e) { console.warn("スケジュール予告失敗:", id, e); }
+            }
+            continue;
+          }
+          continue; // スケジュールがアクティブだが時刻前 → 何もしない
+        }
+
+        // ② 手動の再開予定日時チェック
+        const d = latestData[id];
+        if (d && d.status === "closed" && d.reopen_mode === "datetime" && d.reopen) {
+          if (now >= new Date(d.reopen).getTime()) {
+            try {
+              await set(ref(db, "services/" + id), {
+                status: "open", period: "", reason: "", reopen: "", reopen_mode: "none",
+                notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
+              });
+            } catch (e) { console.warn("手動再開切替失敗:", id, e); }
+          }
+        }
+      }
+    }
+
+    setInterval(checkAll, 60 * 1000);
+    checkAll(); // ページ読み込み直後にも即チェック
+
+    // ──── ステータス描画 ────
+    function renderStatus(id, d) {
+      const isOpen   = d.status === "open";
+      const isNotice = d.status === "notice";
+      const isClosed = d.status === "closed";
+      const card     = document.getElementById("card-" + id);
+
+      if (isOpen)   card.className = "svc-card open";
+      if (isNotice) card.className = "svc-card notice";
+      if (isClosed) card.className = "svc-card closed";
+
+      const badge = document.getElementById("badge-" + id);
+      if (isOpen || isNotice) {
+        badge.textContent = "稼働中";
+        badge.className   = "svc-badge badge-open";
+      } else {
+        badge.textContent = "停止中";
+        badge.className   = "svc-badge badge-closed pulse-closed";
+      }
+
+      const iconEl = document.getElementById("icon-" + id);
+      iconEl.className = "status-icon";
+
+      const info = document.getElementById("info-" + id);
+
+      // 停止予告
+      if (isNotice && (d.notice_period || d.notice_msg)) {
+        let html = '<div class="notice-bar">📢 停止予告</div>';
+        if (d.notice_period) html += detailRow("予告期間", d.notice_period);
+        if (d.notice_msg)    html += detailRow("内容",     d.notice_msg);
+        info.innerHTML = html;
+        info.className = "stop-info notice-info";
+        info.style.display = "block";
+
+      // 停止中
+      } else if (isClosed && (d.period || d.reason || d.reopen_mode)) {
+        let html = "";
+        if (d.period) html += detailRow("停止期間", d.period);
+        if (d.reason) html += detailRow("停止理由", d.reason);
+        html += detailRow("再開予定", fmtReopen(d));
+        info.innerHTML = html;
+        info.className = "stop-info";
+        info.style.display = "block";
+
+      } else {
+        info.style.display = "none";
+      }
+    }
+
+    function detailRow(label, val) {
+      if (!val) return "";
+      return `<div class="detail-row">
+        <span class="detail-label">${label}</span>
+        <span class="detail-val">${esc(val)}</span>
+      </div>`;
+    }
+
+    // 再開予定の表示文字列を生成
+    function fmtReopen(d) {
+      const mode = d.reopen_mode || "none";
+      if (mode === "undecided") return "未定";
+      if (mode === "none" || !d.reopen) return "";
+      const dt = new Date(d.reopen);
+      const dateStr = dt.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+      if (mode === "dateonly") return dateStr + "（時間未定）";
+      return dateStr + " " + dt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) + " 頃";
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    window.toggleDetail = (id) => {
+      const body = document.getElementById("detail-" + id);
+      const btn  = document.getElementById("toggle-" + id);
+      const open = body.style.display === "none" || body.style.display === "";
+      body.style.display = open ? "block" : "none";
+      btn.textContent    = open ? "▲ 詳細を閉じる" : "▼ 詳細・利用案内を見る";
+    };
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif; background: #f2f4f2; color: #1a1a1a; min-height: 100vh; }
+
+    header { background: #2d6a4f; color: #fff; padding: 14px 20px 12px; }
+    header h1 { font-size: 18px; font-weight: 700; }
+    header p  { font-size: 14px; opacity: 0.75; margin-top: 2px; }
+
+    .realtime-bar { background: #1b4332; color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 16px; font-size: 14px; }
+    .dot { width: 8px; height: 8px; background: #74c69d; border-radius: 50%; animation: pulse-dot 2s infinite; flex-shrink: 0; }
+    @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(.85)} }
+
+    .app { max-width: 560px; margin: 0 auto; padding: 16px; }
+
+    .svc-card { background: #fff; border-radius: 12px; border: 1px solid #e0e0e0; margin-bottom: 16px; overflow: hidden; transition: border-color 0.3s; }
+    .svc-card.open   { border-left: 5px solid #52b788; }
+    .svc-card.closed { border-left: 5px solid #e05252; }
+    .svc-card.notice { border-left: 5px solid #e8a020; }
+
+    .svc-header { display: flex; align-items: center; gap: 12px; padding: 16px; }
+    .status-icon { font-size: 26px; flex-shrink: 0; display: inline-block; }
+
+    .svc-label { font-size: 17px; font-weight: 700; flex: 1; }
+    .svc-badge { font-size: 15px; font-weight: 700; padding: 5px 14px; border-radius: 20px; flex-shrink: 0; }
+    .badge-open   { background: #d8f3dc; color: #1b4332; }
+    .badge-closed { background: #ffe0e0; color: #7f1d1d; }
+
+    /* 停止中バッジのみ点滅 */
+    .pulse-closed { animation: pulse-closed 1.2s ease-in-out infinite; }
+    @keyframes pulse-closed { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+    .stop-info { border-top: 1px solid #f0f0f0; padding: 10px 16px 14px 58px; background: #fffaf9; }
+    .notice-info { background: #fffbf0; border-top: 1px solid #f5e4c0; padding: 10px 16px 14px 16px; }
+    .notice-bar { font-size: 14px; font-weight: 700; color: #7a4f00; background: #fef0c0; border-radius: 6px; padding: 5px 10px; display: inline-block; margin-bottom: 8px; }
+    .notice-info .detail-label { width: 58px; }
+
+    .detail-row   { display: flex; gap: 10px; margin-bottom: 5px; font-size: 15px; }
+    .detail-label { color: #999; flex-shrink: 0; width: 58px; }
+    .detail-val   { color: #333; line-height: 1.6; }
+
+    .toggle-btn { width: 100%; padding: 10px 16px; background: #f8faf8; border: none; border-top: 1px solid #eee; text-align: left; font-size: 15px; color: #2d6a4f; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .toggle-btn:hover { background: #f0f5f0; }
+
+    .detail-body { border-top: 1px solid #eee; padding: 16px 18px; font-size: 15px; line-height: 1.8; color: #333; background: #fafafa; }
+    .detail-body h3 { font-size: 15px; font-weight: 700; color: #2d6a4f; margin: 14px 0 6px; padding-left: 8px; border-left: 3px solid #52b788; }
+    .detail-body h3:first-child { margin-top: 0; }
+    .detail-body p  { margin-bottom: 6px; }
+    .detail-body ul { margin: 4px 0 8px 18px; }
+    .detail-body li { margin-bottom: 3px; }
+    .detail-body .note { font-size: 14px; color: #777; background: #f0f0f0; border-radius: 6px; padding: 8px 12px; margin-top: 8px; line-height: 1.7; }
+    .detail-body table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+    .detail-body th { background: #e8f4ed; color: #1b4332; padding: 6px 8px; text-align: left; border: 1px solid #c8dfd0; }
+    .detail-body td { padding: 6px 8px; border: 1px solid #e0e0e0; vertical-align: top; }
+    .detail-body tr:nth-child(even) td { background: #f8faf8; }
+
+    /* ── ごみ収集日ウィジェット ── */
+    .gomi-card {
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid #e0e0e0;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .gomi-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px;
+      background: #f8faf8;
+      border-bottom: 1px solid #eee;
+    }
+    .gomi-title { font-size: 17px; font-weight: 700; flex: 1; color: #1a1a1a; }
+    .gomi-body  { padding: 12px 14px; }
+    .gomi-area-label { font-size: 14px; color: #666; margin-bottom: 6px; display: block; }
+    .gomi-select {
+      width: 100%; padding: 10px 12px; font-size: 15px;
+      border: 1px solid #ccc; border-radius: 8px;
+      background: #fafafa; color: #1a1a1a;
+      margin-bottom: 12px; font-family: inherit;
+      -webkit-appearance: none;
+    }
+    .gomi-select:focus { outline: none; border-color: #2d6a4f; }
+    .gomi-day-card {
+      background: #f8faf8; border: 1px solid #eee;
+      border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    }
+    .gomi-day-label  { font-size: 15px; font-weight: 700; color: #1a1a1a; flex-shrink: 0; }
+    .gomi-today    { font-size: 12px; font-weight: 700; background: #d8f3dc; color: #1b4332; padding: 2px 9px; border-radius: 20px; flex-shrink: 0; }
+    .gomi-tomorrow { font-size: 12px; font-weight: 700; background: #fef3dc; color: #7a4f00; padding: 2px 9px; border-radius: 20px; flex-shrink: 0; }
+    .gomi-tags  { display: flex; flex-wrap: wrap; gap: 6px; }
+    .gomi-tag   { font-size: 14px; font-weight: 700; padding: 4px 12px; border-radius: 20px; }
+    .gomi-moe   { background: #d8f3dc; color: #1b4332; }
+    .gomi-moe2  { background: #dce8fa; color: #1a3a6b; }
+    .gomi-pet   { background: #fef3dc; color: #7a4f00; }
+    .gomi-bin   { background: #fce8f0; color: #7f1d3a; }
+    .gomi-koshi { background: #f0f0f0; color: #444; }
+
+    /* マップリンクボタン */
+    .map-link-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 15px; font-weight: 600;
+      color: #1a3a6b; background: #e8f0fa;
+      border: 1px solid #a8c0e0; border-radius: 8px;
+      padding: 8px 14px; text-decoration: none;
+      margin-top: 10px; margin-bottom: 4px;
+    }
+    .map-link-btn:hover { background: #d0e4f7; }
+
+    /* 注意書きエリア */
+    .gomi-notes { margin-top: 10px; }
+    .gomi-note-row {
+      display: flex; align-items: flex-start; gap: 6px;
+      font-size: 15px; color: #555; margin-bottom: 5px; line-height: 1.6;
+    }
+    .gomi-note-icon { flex-shrink: 0; font-size: 16px; }
+
+    /* 台風折りたたみ */
+    .gomi-typhoon-toggle {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 15px; color: #555; background: none;
+      border: none; padding: 0; cursor: pointer;
+      font-family: inherit; margin-bottom: 0;
+      width: 100%; text-align: left;
+    }
+    .gomi-typhoon-toggle:hover { color: #1a3a6b; }
+    .gomi-typhoon-body {
+      margin-top: 8px; padding: 10px 12px;
+      background: #f0f4fa; border-radius: 8px;
+      font-size: 15px; color: #444; line-height: 1.7;
+      border-left: 3px solid #4a7ac8;
+    }
+    .gomi-typhoon-body p { margin-bottom: 6px; }
+    .gomi-typhoon-body p:last-child { margin-bottom: 0; }
+    .gomi-typhoon-body .note-small { font-size: 14px; color: #666; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>読谷村　サービス稼働状況</h1>
+  <p>各サービスの現在の状態をご確認いただけます</p>
+</header>
+
+<div class="realtime-bar">
+  <span class="dot"></span>
+  リアルタイムで自動更新されます
+</div>
+
+<div class="app">
+
+  <!-- ごみ収集日カード -->
+  <div class="gomi-card">
+    <div class="gomi-header">
+      <span style="font-size:22px;">🗑️</span>
+      <span class="gomi-title">ごみ収集日（直近3日）</span>
+    </div>
+    <div class="gomi-body">
+      <span class="gomi-area-label">お住まいのエリアを選択</span>
+      <select class="gomi-select" id="area-sel" onchange="saveArea();renderGomi()">
+        <option value="1">① 高志保(1)・長浜(1)</option>
+        <option value="2">② 波平(1)・上地・高志保(2)・座喜味(3)</option>
+        <option value="3">③ 長浜(2)・瀬名波・渡慶次・儀間・宇座</option>
+        <option value="4a">④-1 座喜味(1)（県営波平団地含）</option>
+        <option value="4b">④-2 楚辺・波平(2)・座喜味(2)・都屋</option>
+        <option value="5">⑤ 渡具知・古堅・大湾・比謝・比謝矼・伊良皆(1)・大木(1)</option>
+        <option value="6">⑥ 喜名・横田・親志・座喜味(トーガー地域/シーレイク)・伊良皆(2)・大木(2)</option>
+      </select>
+      <div id="gomi-cards"></div>
+
+      <!-- 注意書き -->
+      <div class="gomi-notes">
+        <div class="gomi-note-row" style="margin-bottom:8px;">
+          <span class="gomi-note-icon">📄</span>
+          <a href="https://cccc.backshelf.jp/bookview/?filseq=12401&page=1" target="_blank" style="color:#1a3a6b;font-size:15px;">ごみの分け方・出し方（PDF）を見る</a>
+        </div>
+        <div class="gomi-note-row">
+          <span class="gomi-note-icon">🕗</span>
+          <span>収集日の<strong>朝8時30分まで</strong>に門前へ出してください</span>
+        </div>
+        <div class="gomi-note-row">
+          <button class="gomi-typhoon-toggle" onclick="toggleTyphoon()">
+            <span>🌀</span>
+            <span id="typhoon-toggle-label">台風時のごみ出しについて ▼</span>
+          </button>
+        </div>
+        <div id="typhoon-body" class="gomi-typhoon-body" style="display:none;">
+          <p>「暴風警報」発令中、または業務中に「暴風警報」が発令される見込みで危険性がある場合は、ごみの収集を停止します。</p>
+          <p>朝8時30分までに「暴風警報」が解除されていない場合は、次回のごみ出しの日にお願いします。</p>
+          <p class="note-small">※ 暴風警報が発令されていない場合でも、ごみが飛散しないよう各自で対策をお願いします。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 草木資源化施設 -->
+  <div id="card-kusaki" class="svc-card open">
+    <div class="svc-header">
+      <span class="status-icon" id="icon-kusaki">🌿</span>
+      <span class="svc-label">草木資源化施設の稼働状況</span>
+      <span class="svc-badge badge-open" id="badge-kusaki">稼働中</span>
+    </div>
+    <div class="stop-info" id="info-kusaki" style="display:none;"></div>
+    <button class="toggle-btn" id="toggle-kusaki" onclick="toggleDetail('kusaki')">▼ 詳細・利用案内を見る</button>
+    <div class="detail-body" id="detail-kusaki" style="display:none;">
+      <h3>家庭からの草木について</h3>
+      <p>家庭から出る草木を草木資源化施設に搬入することにより、チップ化されます。チップは無料で配布しています。ごみの減量化や地球温暖化防止に向け、ぜひ施設をご活用ください。</p>
+      <h3>搬入場所・時間</h3>
+      <p>📍 読谷村字儀間689番地</p>
+      <a class="map-link-btn" href="https://www.google.co.jp/maps/place/%E8%8D%89%E6%9C%A8%E8%B3%87%E6%BA%90%E5%8C%96%E6%96%BD%E8%A8%AD/@26.4184561,127.7181645,327m/data=!3m1!1e3!4m6!3m5!1s0x34e517d88f2a95c9:0x1461ae8002fc4ece!8m2!3d26.4188696!4d127.7179991!16s%2Fg%2F11td35zyc6?entry=ttu&g_ep=EgoyMDI2MDQyMi4wIKXMDSoASAFQAw%3D%3D" target="_blank">🗺️ Google マップで見る</a>
+      <p>🕐 8時30分〜11時45分　／　13時00分〜16時45分</p>
+      <ul>
+        <li>1月1日〜3日以外は、休日・祝日を含め毎日搬入できます。</li>
+        <li>雨天の際（前後含む）は施設内に水がたまり搬入できない場合があります。事前に生活環境課（098-982-9214）へご確認ください。</li>
+      </ul>
+      <h3>搬入できないもの</h3>
+      <ul>
+        <li>廃材・加工された木材</li>
+        <li>バナナ・ヤシ・ドラゴンフルーツ等の水分の多い木</li>
+        <li>石・ごみ・土類が混ざっている草木</li>
+        <li>太さ30cm以上の木</li>
+      </ul>
+      <h3>注意事項</h3>
+      <ul>
+        <li>造園業・剪定・伐採等による営利目的の草木は搬入対象外です。</li>
+        <li>受付の際、自動車免許の提示が必要です。</li>
+        <li>管理人の指示に従って分別して搬入してください。違反があった際は搬入後に引き取らせる場合があります。</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- コンビニ交付 -->
+  <div id="card-conveni" class="svc-card open">
+    <div class="svc-header">
+      <span class="status-icon" id="icon-conveni">🏛️</span>
+      <span class="svc-label">コンビニ交付の稼働状況</span>
+      <span class="svc-badge badge-open" id="badge-conveni">稼働中</span>
+    </div>
+    <div class="stop-info" id="info-conveni" style="display:none;"></div>
+    <button class="toggle-btn" id="toggle-conveni" onclick="toggleDetail('conveni')">▼ 詳細・利用案内を見る</button>
+    <div class="detail-body" id="detail-conveni" style="display:none;">
+      <h3>サービスの概要</h3>
+      <p>読谷村では、全国のコンビニエンスストアで住民票等を取得できる証明書のコンビニ交付サービスを実施しています。</p>
+      <h3>利用できる方</h3>
+      <ul>
+        <li>読谷村に住民登録があり、利用者証明用電子証明書を搭載したマイナンバーカードをお持ちの方</li>
+        <li>※ 15歳未満・成年被後見人の方は役場窓口での手続きとなります。</li>
+      </ul>
+      <h3>取得できる証明書と手数料</h3>
+      <table>
+        <tr><th>証明書の種類</th><th>手数料（1通）</th></tr>
+        <tr><td>住民票の写し</td><td>200円</td></tr>
+        <tr><td>住民票記載事項証明書</td><td>200円</td></tr>
+        <tr><td>印鑑登録証明書</td><td>200円</td></tr>
+        <tr><td>所得証明書</td><td>200円</td></tr>
+        <tr><td>課税証明書</td><td>200円</td></tr>
+      </table>
+      <p class="note">令和7年4月1日〜令和8年9月30日の間、発行手数料は200円。役場窓口での発行手数料は300円です。</p>
+      <h3>利用できる時間帯</h3>
+      <p>🕐 午前6時30分〜午後11時00分<br>（12月29日〜翌年1月3日を除く。システムメンテナンス日は利用不可の場合あり）</p>
+      <h3>ご利用方法</h3>
+      <ul>
+        <li>マイナンバーカードをコンビニへ持参し、マルチコピー機（キオスク端末）を操作します。</li>
+        <li>メインメニューから「行政サービス」を選択し、画面の指示に従い暗証番号等を入力して証明書を取得します。</li>
+      </ul>
+      <h3>注意事項</h3>
+      <ul>
+        <li>戸籍関係証明書はコンビニでは取得できません。役場窓口へお越しください。</li>
+        <li>手数料免除に該当する方はコンビニ交付では対応していません。役場窓口で手続きください。</li>
+        <li>暗証番号を連続3回間違えるとロックがかかります。解除は本人が役場で手続きが必要です。</li>
+        <li>証明書が出力されるまでその場を離れないようにしてください。</li>
+        <li>マイナンバーカードの置き忘れにご注意ください。</li>
+      </ul>
+    </div>
+  </div>
+
+</div><script>
+  const GOMI_KEY = "yomitan_gomi_area_v1";
+  const GOMI_SCHEDULES = {
+    "1":  { days: { 1:[{l:"もやせるごみ",c:"gomi-moe"}], 2:[{l:"ペットボトル",c:"gomi-pet",w:[1,3]},{l:"古紙",c:"gomi-koshi",w:[2,4]}], 4:[{l:"もやせるごみ",c:"gomi-moe"}], 5:[{l:"もやさないごみ・有害ごみ",c:"gomi-moe2"}], 6:[{l:"ビン・スプレー缶",c:"gomi-bin",w:[1,3]}] } },
+    "2":  { days: { 1:[{l:"もやせるごみ",c:"gomi-moe"}], 2:[{l:"ペットボトル",c:"gomi-pet",w:[1,3]},{l:"古紙",c:"gomi-koshi",w:[2,4]}], 3:[{l:"もやさないごみ・有害ごみ",c:"gomi-moe2"}], 4:[{l:"もやせるごみ",c:"gomi-moe"}], 6:[{l:"ビン・スプレー缶",c:"gomi-bin",w:[1,3]}] } },
+    "3":  { days: { 1:[{l:"もやせるごみ",c:"gomi-moe"}], 3:[{l:"もやさないごみ・有害ごみ",c:"gomi-moe2"}], 4:[{l:"もやせるごみ",c:"gomi-moe"}], 5:[{l:"ペットボトル",c:"gomi-pet",w:[1,3]},{l:"古紙",c:"gomi-koshi",w:[2,4]}], 6:[{l:"ビン・スプレー缶",c:"gomi-bin",w:[1,3]}] } },
+    "4a": { days: { 1:[{l:"ペットボトル",c:"gomi-pet",w:[1,3]},{l:"古紙",c:"gomi-koshi",w:[2,4]}], 2:[{l:"もやせるごみ",c:"gomi-moe"}], 3:[{l:"もやさないごみ・有害ごみ",c:"gomi-moe2"}], 5:[{l:"もやせるごみ",c:"gomi-moe"}], 6:[{l:"ビン・スプレー缶",c:"gomi-bin",w:[1,3]}] } },
+    "4b": { days: { 1:[{l:"ペットボトル",c:"gomi-pet",w:[1,3]},{l:"古紙",c:"gomi-koshi",w:[2,4]}], 2:[{l:"もやせるごみ",c:"gomi-moe"}], 3:[{l:"もやさないごみ・有害ごみ",c:"gomi-moe2"}], 5:[{l:"もやせるごみ",c:"gomi-moe"}], 6:[{l:"ビン・スプレー缶",c:"gomi-bin",w:[1,3]}] } },
+    "5":  { days: { 1:[{l:"もやせるごみ",c:"gomi-moe"}], 3:[{l:"ペットボトル",c:"gomi-pet",w:[1,3]},{l:"古紙",c:"gomi-koshi",w:[2,4]}], 4:[{l:"もやせるごみ",c:"gomi-moe"}], 5:[{l:"もやさないごみ・有害ごみ",c:"gomi-moe2"}], 6:[{l:"ビン・スプレー缶",c:"gomi-bin",w:[2,4]}] } },
+    "6":  { days: { 1:[{l:"もやさないごみ・有害ごみ",c:"gomi-moe2"}], 2:[{l:"もやせるごみ",c:"gomi-moe"}], 4:[{l:"ペットボトル",c:"gomi-pet",w:[1,3]},{l:"古紙",c:"gomi-koshi",w:[2,4]}], 5:[{l:"もやせるごみ",c:"gomi-moe"}], 6:[{l:"ビン・スプレー缶",c:"gomi-bin",w:[2,4]}] } }
+  };
+  const DOW_JA = ["日","月","火","水","木","金","土"];
+  const MON_JA = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+
+  function weekOfMonth(d) {
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    return Math.ceil((d.getDate() + first.getDay()) / 7);
+  }
+  function getItems(key, date) {
+    const s = GOMI_SCHEDULES[key];
+    if (!s) return [];
+    const items = s.days[date.getDay()];
+    if (!items) return [];
+    const wom = weekOfMonth(date);
+    return items.filter(i => !i.w || i.w.includes(wom));
+  }
+  function getNext3(key) {
+    const res = [], today = new Date(); today.setHours(0,0,0,0);
+    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+    let d = new Date(today), checked = 0;
+    while (res.length < 3 && checked < 60) {
+      const isNewYear = d.getMonth() === 0 && d.getDate() === 1;
+      if (!isNewYear) {
+        const items = getItems(key, d);
+        if (items.length) res.push({
+          date: new Date(d), items,
+          isToday:    d.getTime() === today.getTime(),
+          isTomorrow: d.getTime() === tomorrow.getTime()
+        });
+      }
+      d.setDate(d.getDate() + 1); checked++;
+    }
+    return res;
+  }
+  function toggleTyphoon() {
+    const body  = document.getElementById("typhoon-body");
+    const label = document.getElementById("typhoon-toggle-label");
+    const open  = body.style.display === "none";
+    body.style.display  = open ? "block" : "none";
+    label.textContent   = open ? "台風時のごみ出しについて ▲" : "台風時のごみ出しについて ▼";
+  }
+
+  function renderGomi() {
+    const key = document.getElementById("area-sel").value;
+    const days = getNext3(key);
+    const container = document.getElementById("gomi-cards");
+    container.innerHTML = "";
+    days.forEach(({ date, items, isToday, isTomorrow }) => {
+      const label = `${MON_JA[date.getMonth()]}${date.getDate()}日（${DOW_JA[date.getDay()]}）`;
+      const badge = isToday    ? '<span class="gomi-today">今日</span>'
+                  : isTomorrow ? '<span class="gomi-tomorrow">明日</span>'
+                  : '';
+      const tags = items.map(i => `<span class="gomi-tag ${i.c}">${i.l}</span>`).join("");
+      const div = document.createElement("div");
+      div.className = "gomi-day-card";
+      div.innerHTML = `<span class="gomi-day-label">${label}</span>${badge}<div class="gomi-tags">${tags}</div>`;
+      container.appendChild(div);
+    });
+  }
+  function saveArea() {
+    try { localStorage.setItem(GOMI_KEY, document.getElementById("area-sel").value); } catch(e) {}
+  }
+  function initGomi() {
+    try {
+      const saved = localStorage.getItem(GOMI_KEY);
+      if (saved) document.getElementById("area-sel").value = saved;
+    } catch(e) {}
+    renderGomi();
+  }
+  initGomi();
+</script>
+</body>
+</html>
