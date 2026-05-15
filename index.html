@@ -16,7 +16,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+    import { getDatabase, ref, set, remove, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDNdtr1D4GhzQ7aWoBlAFYkTGLioPlk4io",
@@ -46,13 +46,68 @@
       const now = Date.now();
       for (const id of serviceIds) {
 
-        // ① スケジュールチェック（優先）
+        // ① schedules_list（複数スケジュール：conveni用）をチェック
+        const schListSnap = await new Promise(resolve =>
+          onValue(ref(db, "schedules_list/" + id), resolve, { onlyOnce: true })
+        );
+        const schList = schListSnap.val();
+        if (schList) {
+          // 停止開始時刻順にソートして、現在該当するスケジュールを探す
+          const entries = Object.entries(schList).sort((a, b) =>
+            new Date(a[1].closedAt) - new Date(b[1].closedAt)
+          );
+          let handled = false;
+          for (const [key, s] of entries) {
+            // 復旧日時を過ぎた → 稼働中に戻してこのスケジュールを削除
+            if (s.reopenAt && now >= new Date(s.reopenAt).getTime()) {
+              try {
+                await set(ref(db, "services/" + id), {
+                  status: "open", period: "", reason: "", reopen: "", reopen_mode: "none",
+                  notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
+                });
+                await remove(ref(db, "schedules_list/" + id + "/" + key));
+              } catch (e) { console.warn("復旧失敗:", id, key, e); }
+              handled = true; continue;
+            }
+            // 停止開始日時を過ぎた → 停止中に切替
+            if (s.closedAt && now >= new Date(s.closedAt).getTime()) {
+              const d = latestData[id];
+              if (d && d.status !== "closed") {
+                try {
+                  await set(ref(db, "services/" + id), {
+                    status: "closed", period: "", reason: s.reason || "",
+                    reopen: s.reopenAt || "", reopen_mode: s.reopenAt ? "datetime" : "none",
+                    notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
+                  });
+                } catch (e) { console.warn("停止切替失敗:", id, key, e); }
+              }
+              handled = true; break;
+            }
+            // 予告開始日時を過ぎた → 予告に切替
+            if (s.noticeAt && now >= new Date(s.noticeAt).getTime()) {
+              const d = latestData[id];
+              if (d && d.status !== "notice" && d.status !== "closed") {
+                try {
+                  await set(ref(db, "services/" + id), {
+                    status: "notice", period: "", reason: "",
+                    reopen: "", reopen_mode: "none",
+                    notice_period: "", notice_msg: s.noticeMsg || "",
+                    updatedAt: new Date().toISOString()
+                  });
+                } catch (e) { console.warn("予告切替失敗:", id, key, e); }
+              }
+              handled = true; break;
+            }
+          }
+          if (handled) continue;
+        }
+
+        // ② schedules（単数スケジュール：kusaki用）をチェック
         const schSnap = await new Promise(resolve =>
           onValue(ref(db, "schedules/" + id), resolve, { onlyOnce: true })
         );
         const sch = schSnap.val();
         if (sch && sch.active) {
-          // 復旧日時を過ぎた → 稼働中に戻してスケジュール終了
           if (sch.reopenAt && now >= new Date(sch.reopenAt).getTime()) {
             try {
               await set(ref(db, "services/" + id), {
@@ -63,7 +118,6 @@
             } catch (e) { console.warn("スケジュール復旧失敗:", id, e); }
             continue;
           }
-          // 停止開始日時を過ぎた → 停止中に切替
           if (sch.closedAt && now >= new Date(sch.closedAt).getTime()) {
             const d = latestData[id];
             if (d && d.status !== "closed") {
@@ -77,7 +131,6 @@
             }
             continue;
           }
-          // 予告開始日時を過ぎた → 予告に切替
           if (sch.noticeAt && now >= new Date(sch.noticeAt).getTime()) {
             const d = latestData[id];
             if (d && d.status !== "notice" && d.status !== "closed") {
@@ -92,10 +145,10 @@
             }
             continue;
           }
-          continue; // スケジュールがアクティブだが時刻前 → 何もしない
+          continue;
         }
 
-        // ② 手動の再開予定日時チェック
+        // ③ 手動の再開予定日時チェック
         const d = latestData[id];
         if (d && d.status === "closed" && d.reopen_mode === "datetime" && d.reopen) {
           if (now >= new Date(d.reopen).getTime()) {
