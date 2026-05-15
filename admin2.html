@@ -7,7 +7,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getDatabase, ref, set, push, remove, onValue }
+    import { getDatabase, ref, set, push, remove, update, onValue }
       from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
     const firebaseConfig = {
@@ -28,6 +28,7 @@
 
     let loggedIn       = false;
     let selectedStatus = "open";
+    let editingKey     = null; // 編集中のスケジュールキー（nullなら新規）
 
     window.doLogin = () => {
       if (document.getElementById("pw-input").value === PASSWORD) {
@@ -69,25 +70,85 @@
       const empty = document.getElementById("schedule-empty");
       box.innerHTML = "";
       if (!data) { empty.style.display = "block"; return; }
-      empty.style.display = "none";
       const entries = Object.entries(data).sort((a, b) =>
         new Date(a[1].closedAt) - new Date(b[1].closedAt)
       );
-      entries.forEach(([key, s]) => {
+      empty.style.display = "none";
+      const count = entries.length;
+
+      entries.forEach(([key, s], idx) => {
         const div = document.createElement("div");
         div.className = "sch-item";
+
+        // 複数ある場合は番号バッジを表示
+        const numBadge = count > 1
+          ? `<div class="sch-num-badge">スケジュール ${"①②③④⑤⑥⑦⑧⑨⑩"[idx] || (idx+1)}</div>`
+          : "";
+
+        // 停止開始日時を見出しとして目立たせる
+        const closedLabel = s.closedAt
+          ? `<div class="sch-main-date">🚫 ${fmtDt(s.closedAt)} 停止開始</div>`
+          : "";
+
         let rows = "";
         if (s.noticeAt)  rows += `<div class="sch-row"><span>📢</span><span>予告開始：${fmtDt(s.noticeAt)}</span></div>`;
-        if (s.closedAt)  rows += `<div class="sch-row"><span>🚫</span><span>停止開始：${fmtDt(s.closedAt)}</span></div>`;
         if (s.reopenAt)  rows += `<div class="sch-row"><span>🌿</span><span>復旧予定：${fmtDt(s.reopenAt)}</span></div>`;
         if (s.noticeMsg) rows += `<div class="sch-memo">予告文：${esc(s.noticeMsg)}</div>`;
         if (s.reason)    rows += `<div class="sch-memo">停止理由：${esc(s.reason)}</div>`;
-        div.innerHTML = `<div class="sch-item-rows">${rows}</div>
-          <button class="sch-delete-btn" onclick="deleteSchedule('${key}')">削除</button>`;
+
+        div.innerHTML = `
+          ${numBadge}
+          <div class="sch-item-body">
+            ${closedLabel}
+            <div class="sch-item-rows">${rows}</div>
+            <div class="sch-item-btns">
+              <button class="sch-edit-btn"   onclick="startEdit('${key}')">編集</button>
+              <button class="sch-delete-btn" onclick="deleteSchedule('${key}')">削除</button>
+            </div>
+          </div>`;
         box.appendChild(div);
       });
     }
 
+    // ──── 編集開始：フォームに値を読み込む ────
+    window.startEdit = (key) => {
+      onValue(ref(db, "schedules_list/" + SERVICE_ID + "/" + key), (snap) => {
+        const s = snap.val();
+        if (!s) return;
+        editingKey = key;
+        document.getElementById("sch-notice-at").value  = s.noticeAt ? toLocal(s.noticeAt) : "";
+        document.getElementById("sch-closed-at").value  = s.closedAt ? toLocal(s.closedAt) : "";
+        document.getElementById("sch-reopen-at").value  = s.reopenAt ? toLocal(s.reopenAt) : "";
+        document.getElementById("sch-notice-msg").value = s.noticeMsg || "";
+        document.getElementById("sch-reason").value     = s.reason    || "";
+
+        // フォームを編集モードに切替
+        document.getElementById("sch-form-title").textContent   = "スケジュールを編集";
+        document.getElementById("sch-register-btn").textContent = "変更を保存する";
+        document.getElementById("sch-cancel-edit-btn").style.display = "block";
+        toggleScheduleForm(true);
+        document.getElementById("schedule-form").scrollIntoView({ behavior: "smooth" });
+      }, { onlyOnce: true });
+    };
+
+    // ──── 編集キャンセル ────
+    window.cancelEdit = () => {
+      editingKey = null;
+      resetForm();
+      document.getElementById("sch-form-title").textContent   = "スケジュールを新規追加";
+      document.getElementById("sch-register-btn").textContent = "スケジュールを登録する";
+      document.getElementById("sch-cancel-edit-btn").style.display = "none";
+    };
+
+    function resetForm() {
+      ["sch-notice-at","sch-closed-at","sch-reopen-at"].forEach(id =>
+        document.getElementById(id).value = ""
+      );
+      document.getElementById("sch-notice-msg").value = "";
+      document.getElementById("sch-reason").value     = "";
+    }
+
+    // ──── 登録 or 上書き保存 ────
     window.registerSchedule = async () => {
       const noticeAt  = document.getElementById("sch-notice-at").value;
       const closedAt  = document.getElementById("sch-closed-at").value;
@@ -100,30 +161,42 @@
       if (new Date(closedAt) >= new Date(reopenAt)) { showToast("復旧日時は停止開始より後にしてください"); return; }
 
       const btn = document.getElementById("sch-register-btn");
-      btn.disabled = true; btn.textContent = "登録中...";
+      btn.disabled = true; btn.textContent = "保存中...";
+
+      const payload = {
+        noticeAt:  noticeAt ? new Date(noticeAt).toISOString() : "",
+        closedAt:  new Date(closedAt).toISOString(),
+        reopenAt:  new Date(reopenAt).toISOString(),
+        noticeMsg, reason,
+        updatedAt: new Date().toISOString()
+      };
+
       try {
-        await push(schListRef, {
-          noticeAt:  noticeAt ? new Date(noticeAt).toISOString() : "",
-          closedAt:  new Date(closedAt).toISOString(),
-          reopenAt:  new Date(reopenAt).toISOString(),
-          noticeMsg, reason,
-          createdAt: new Date().toISOString()
-        });
-        ["sch-notice-at","sch-closed-at","sch-reopen-at"].forEach(id =>
-          document.getElementById(id).value = ""
-        );
-        document.getElementById("sch-notice-msg").value = "";
-        document.getElementById("sch-reason").value     = "";
-        showToast("スケジュールを登録しました ✓");
+        if (editingKey) {
+          // 上書き保存
+          await set(ref(db, "schedules_list/" + SERVICE_ID + "/" + editingKey), payload);
+          showToast("スケジュールを更新しました ✓");
+        } else {
+          // 新規追加
+          payload.createdAt = new Date().toISOString();
+          await push(schListRef, payload);
+          showToast("スケジュールを登録しました ✓");
+        }
+        editingKey = null;
+        resetForm();
+        document.getElementById("sch-form-title").textContent   = "スケジュールを新規追加";
+        document.getElementById("sch-register-btn").textContent = "スケジュールを登録する";
+        document.getElementById("sch-cancel-edit-btn").style.display = "none";
         toggleScheduleForm(false);
-      } catch (e) { showToast("登録に失敗しました"); }
-      finally { btn.disabled = false; btn.textContent = "スケジュールを登録する"; }
+      } catch (e) { showToast("保存に失敗しました"); }
+      finally { btn.disabled = false; }
     };
 
     window.deleteSchedule = async (key) => {
       if (!confirm("このスケジュールを削除しますか？")) return;
       try {
         await remove(ref(db, "schedules_list/" + SERVICE_ID + "/" + key));
+        if (editingKey === key) cancelEdit();
         showToast("スケジュールを削除しました");
       } catch (e) { showToast("削除に失敗しました"); }
     };
@@ -135,6 +208,7 @@
         : (form.style.display === "none" || form.style.display === "");
       form.style.display = open ? "block" : "none";
       btn.textContent = open ? "▲ 閉じる" : "▼ スケジュールを新規追加する";
+      if (!open) cancelEdit();
     };
 
     window.selectStatus = (s) => {
@@ -267,34 +341,57 @@
     .schedule-card-header { display: flex; align-items: center; gap: 8px; padding: 14px 18px; background: #f0f4fa; border-bottom: 1px solid #c8d5e8; }
     .schedule-card-title { font-size: 14px; font-weight: 700; color: #1a3a6b; flex: 1; }
     .sch-toggle-btn { font-size: 12px; color: #1a3a6b; background: transparent; border: 1px solid #4a7ac8; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-family: inherit; white-space: nowrap; }
-
     .schedule-list-area { padding: 12px 16px; }
     .schedule-empty { font-size: 13px; color: #aaa; text-align: center; padding: 8px 0; }
 
     /* 各スケジュール */
     .sch-item {
-      display: flex; align-items: flex-start; gap: 10px;
       background: #f8fbff; border: 1px solid #c8d5e8;
-      border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
+      border-radius: 10px; margin-bottom: 10px; overflow: hidden;
     }
-    .sch-item-rows { flex: 1; }
+    .sch-num-badge {
+      font-size: 12px; font-weight: 700; color: #fff;
+      background: #1a3a6b; padding: 4px 14px;
+    }
+    .sch-item-body { padding: 12px 14px; }
+    .sch-main-date {
+      font-size: 15px; font-weight: 700; color: #7f1d1d;
+      margin-bottom: 8px;
+    }
+    .sch-item-rows { margin-bottom: 8px; }
     .sch-row  { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 4px; }
-    .sch-memo { font-size: 12px; color: #666; margin-top: 4px; }
+    .sch-memo { font-size: 12px; color: #666; margin-top: 2px; margin-bottom: 4px; }
+    .sch-item-btns { display: flex; gap: 8px; margin-top: 10px; }
+    .sch-edit-btn {
+      flex: 1; padding: 7px 0;
+      background: #e8f0fa; border: 1px solid #4a7ac8;
+      border-radius: 6px; color: #1a3a6b; font-size: 13px; font-weight: 600;
+      cursor: pointer; font-family: inherit;
+    }
+    .sch-edit-btn:hover { background: #d0e4f7; }
     .sch-delete-btn {
-      flex-shrink: 0; padding: 5px 10px;
+      flex: 1; padding: 7px 0;
       background: #fff; border: 1px solid #f4a0a0;
-      border-radius: 6px; color: #c0392b; font-size: 12px;
-      cursor: pointer; font-family: inherit; white-space: nowrap;
+      border-radius: 6px; color: #c0392b; font-size: 13px;
+      cursor: pointer; font-family: inherit;
     }
     .sch-delete-btn:hover { background: #fff0f0; }
 
     /* 登録フォーム */
     .schedule-form { padding: 16px 18px; border-top: 1px solid #e8eef8; }
+    .sch-form-title { font-size: 14px; font-weight: 700; color: #1a3a6b; margin-bottom: 10px; }
     .sch-section { font-size: 11px; font-weight: 700; color: #888; letter-spacing: 0.08em; margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
-    .sch-section:first-child { margin-top: 0; }
+    .sch-section:first-of-type { margin-top: 0; }
     .sch-optional { font-size: 11px; color: #aaa; font-weight: 400; margin-left: 4px; }
     .sch-note { font-size: 12px; color: #555; background: #f5f5f5; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
     .sch-auto-note { font-size: 12px; color: #1a3a6b; background: #e8f0fa; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
+    .sch-cancel-btn {
+      width: 100%; margin-top: 8px; padding: 10px;
+      background: transparent; border: 1px solid #ccc;
+      border-radius: 8px; font-size: 14px; color: #888;
+      cursor: pointer; font-family: inherit;
+    }
+    .sch-cancel-btn:hover { background: #f5f5f5; }
 
     .primary-btn { width: 100%; padding: 13px; border: none; border-radius: 8px; background: #1a3a6b; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background 0.15s; }
     .primary-btn:hover    { background: #122a52; }
@@ -338,8 +435,9 @@
         <div id="schedule-empty" class="schedule-empty">登録中のスケジュールはありません</div>
       </div>
 
-      <!-- 登録フォーム -->
+      <!-- 登録・編集フォーム -->
       <div id="schedule-form" class="schedule-form" style="display:none;">
+        <div class="sch-form-title" id="sch-form-title">スケジュールを新規追加</div>
         <div class="sch-note">停止開始・復旧の日時を登録すると自動でステータスが切り替わります。予告開始は省略可能。複数件登録できます。</div>
 
         <div class="sch-section">📢 予告開始日時 <span class="sch-optional">（任意）</span></div>
@@ -357,6 +455,7 @@
         <div class="sch-auto-note">⏱ 復旧日時を過ぎると利用者画面が自動で「稼働中」に切り替わります</div>
 
         <button class="primary-btn" id="sch-register-btn" onclick="registerSchedule()">スケジュールを登録する</button>
+        <button class="sch-cancel-btn" id="sch-cancel-edit-btn" onclick="cancelEdit()" style="display:none;">編集をキャンセルする</button>
       </div>
     </div>
 
