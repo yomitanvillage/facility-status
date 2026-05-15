@@ -7,7 +7,8 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+    import { getDatabase, ref, set, push, remove, onValue }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDNdtr1D4GhzQ7aWoBlAFYkTGLioPlk4io",
@@ -19,11 +20,11 @@
       appId: "1:518782906626:web:46d3da5ec985eb6e97121b"
     };
 
-    const SERVICE_ID  = "conveni";
-    const PASSWORD    = "9207";
-    const db          = getDatabase(initializeApp(firebaseConfig));
-    const svcRef      = ref(db, "services/" + SERVICE_ID);
-    const schRef      = ref(db, "schedules/" + SERVICE_ID);
+    const SERVICE_ID = "conveni";
+    const PASSWORD   = "9207";
+    const db         = getDatabase(initializeApp(firebaseConfig));
+    const svcRef     = ref(db, "services/" + SERVICE_ID);
+    const schListRef = ref(db, "schedules_list/" + SERVICE_ID);
 
     let loggedIn       = false;
     let selectedStatus = "open";
@@ -34,7 +35,7 @@
         document.getElementById("login-section").style.display = "none";
         document.getElementById("panel-section").style.display = "block";
         loadCurrent();
-        loadSchedule();
+        loadSchedules();
       } else {
         document.getElementById("login-error").style.display = "block";
         document.getElementById("pw-input").value = "";
@@ -57,30 +58,34 @@
       }, { onlyOnce: true });
     }
 
-    function loadSchedule() {
-      onValue(schRef, (snap) => { renderScheduleStatus(snap.val()); });
+    function loadSchedules() {
+      onValue(schListRef, (snap) => {
+        renderScheduleList(snap.val());
+      });
     }
 
-    function renderScheduleStatus(s) {
-      const box = document.getElementById("schedule-active-box");
-      if (!s || !s.active) { box.style.display = "none"; return; }
-      box.style.display = "block";
-      let html = "";
-      if (s.noticeAt)  html += `<div class="sch-row"><span class="sch-dot">📢</span><span>予告開始：${fmtDt(s.noticeAt)}</span></div>`;
-      if (s.closedAt)  html += `<div class="sch-row"><span class="sch-dot">🚫</span><span>停止開始：${fmtDt(s.closedAt)}</span></div>`;
-      if (s.reopenAt)  html += `<div class="sch-row"><span class="sch-dot">🌿</span><span>復旧予定：${fmtDt(s.reopenAt)}</span></div>`;
-      if (s.noticeMsg) html += `<div class="sch-memo">予告文：${esc(s.noticeMsg)}</div>`;
-      if (s.reason)    html += `<div class="sch-memo">停止理由：${esc(s.reason)}</div>`;
-      document.getElementById("schedule-active-content").innerHTML = html;
-    }
-
-    function fmtDt(iso) {
-      const dt = new Date(iso);
-      return dt.toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" })
-        + " " + dt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-    }
-    function esc(s) {
-      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+    function renderScheduleList(data) {
+      const box   = document.getElementById("schedule-list-box");
+      const empty = document.getElementById("schedule-empty");
+      box.innerHTML = "";
+      if (!data) { empty.style.display = "block"; return; }
+      empty.style.display = "none";
+      const entries = Object.entries(data).sort((a, b) =>
+        new Date(a[1].closedAt) - new Date(b[1].closedAt)
+      );
+      entries.forEach(([key, s]) => {
+        const div = document.createElement("div");
+        div.className = "sch-item";
+        let rows = "";
+        if (s.noticeAt)  rows += `<div class="sch-row"><span>📢</span><span>予告開始：${fmtDt(s.noticeAt)}</span></div>`;
+        if (s.closedAt)  rows += `<div class="sch-row"><span>🚫</span><span>停止開始：${fmtDt(s.closedAt)}</span></div>`;
+        if (s.reopenAt)  rows += `<div class="sch-row"><span>🌿</span><span>復旧予定：${fmtDt(s.reopenAt)}</span></div>`;
+        if (s.noticeMsg) rows += `<div class="sch-memo">予告文：${esc(s.noticeMsg)}</div>`;
+        if (s.reason)    rows += `<div class="sch-memo">停止理由：${esc(s.reason)}</div>`;
+        div.innerHTML = `<div class="sch-item-rows">${rows}</div>
+          <button class="sch-delete-btn" onclick="deleteSchedule('${key}')">削除</button>`;
+        box.appendChild(div);
+      });
     }
 
     window.registerSchedule = async () => {
@@ -92,39 +97,44 @@
 
       if (!closedAt || !reopenAt) { showToast("停止開始日時と復旧日時は必須です"); return; }
       if (noticeAt && new Date(noticeAt) >= new Date(closedAt)) { showToast("予告開始は停止開始より前の日時にしてください"); return; }
-      if (new Date(closedAt) >= new Date(reopenAt)) { showToast("復旧日時は停止開始より後の日時にしてください"); return; }
+      if (new Date(closedAt) >= new Date(reopenAt)) { showToast("復旧日時は停止開始より後にしてください"); return; }
 
       const btn = document.getElementById("sch-register-btn");
       btn.disabled = true; btn.textContent = "登録中...";
       try {
-        await set(schRef, {
-          active: true,
-          noticeAt: noticeAt ? new Date(noticeAt).toISOString() : "",
-          closedAt: new Date(closedAt).toISOString(),
-          reopenAt: new Date(reopenAt).toISOString(),
+        await push(schListRef, {
+          noticeAt:  noticeAt ? new Date(noticeAt).toISOString() : "",
+          closedAt:  new Date(closedAt).toISOString(),
+          reopenAt:  new Date(reopenAt).toISOString(),
           noticeMsg, reason,
           createdAt: new Date().toISOString()
         });
+        ["sch-notice-at","sch-closed-at","sch-reopen-at"].forEach(id =>
+          document.getElementById(id).value = ""
+        );
+        document.getElementById("sch-notice-msg").value = "";
+        document.getElementById("sch-reason").value     = "";
         showToast("スケジュールを登録しました ✓");
         toggleScheduleForm(false);
       } catch (e) { showToast("登録に失敗しました"); }
       finally { btn.disabled = false; btn.textContent = "スケジュールを登録する"; }
     };
 
-    window.cancelSchedule = async () => {
-      if (!confirm("登録中のスケジュールをキャンセルしますか？\n現在のステータスはそのまま維持されます。")) return;
+    window.deleteSchedule = async (key) => {
+      if (!confirm("このスケジュールを削除しますか？")) return;
       try {
-        await set(schRef, { active: false });
-        showToast("スケジュールをキャンセルしました");
-      } catch (e) { showToast("キャンセルに失敗しました"); }
+        await remove(ref(db, "schedules_list/" + SERVICE_ID + "/" + key));
+        showToast("スケジュールを削除しました");
+      } catch (e) { showToast("削除に失敗しました"); }
     };
 
     window.toggleScheduleForm = (forceOpen) => {
       const form = document.getElementById("schedule-form");
       const btn  = document.getElementById("sch-toggle-btn");
-      const open = forceOpen !== undefined ? forceOpen : (form.style.display === "none" || form.style.display === "");
+      const open = forceOpen !== undefined ? forceOpen
+        : (form.style.display === "none" || form.style.display === "");
       form.style.display = open ? "block" : "none";
-      btn.textContent = open ? "▲ 閉じる" : "▼ スケジュールを新規登録する";
+      btn.textContent = open ? "▲ 閉じる" : "▼ スケジュールを新規追加する";
     };
 
     window.selectStatus = (s) => {
@@ -183,17 +193,23 @@
       else                     { b.textContent = "現在：停止中";             b.className = "cur-badge badge-closed"; }
     }
 
+    function fmtDt(iso) {
+      const dt = new Date(iso);
+      return dt.toLocaleDateString("ja-JP", { month: "long", day: "numeric", weekday: "short" })
+        + " " + dt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    }
     function toLocal(iso) {
       const dt = new Date(iso), pad = n => String(n).padStart(2,"0");
       return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(Math.round(dt.getMinutes()/5)*5%60)}`;
     }
-
     function showToast(msg) {
       const t = document.getElementById("toast");
       t.textContent = msg; t.classList.add("show");
       setTimeout(() => t.classList.remove("show"), 3000);
     }
-
     document.addEventListener("keydown", e => { if (e.key === "Enter" && !loggedIn) window.doLogin(); });
   </script>
 
@@ -201,30 +217,30 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif; background: #f0f2f8; color: #1a1a1a; min-height: 100vh; }
     header { background: #1a3a6b; color: #fff; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; }
-    header h1 { font-size: 17px; font-weight: 700; }
-    .header-tag { font-size: 13px; background: rgba(255,255,255,0.2); padding: 3px 10px; border-radius: 20px; }
+    header h1 { font-size: 15px; font-weight: 700; }
+    .header-tag { font-size: 11px; background: rgba(255,255,255,0.2); padding: 3px 10px; border-radius: 20px; }
     .app { max-width: 480px; margin: 0 auto; padding: 16px; }
 
     .login-box { background: #fff; border: 1px solid #c8d5e8; border-radius: 14px; padding: 28px 24px; margin-top: 8px; }
-    .login-title { font-size: 18px; font-weight: 700; color: #1a3a6b; text-align: center; margin-bottom: 4px; }
-    .login-sub   { font-size: 15px; color: #888; text-align: center; margin-bottom: 20px; }
-    .form-label  { font-size: 14px; color: #666; margin-bottom: 6px; display: block; margin-top: 2px; }
-    input[type="password"] { width: 100%; padding: 12px 14px; font-size: 24px; letter-spacing: 8px; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; margin-bottom: 12px; background: #fafafa; text-align: center; }
+    .login-title { font-size: 16px; font-weight: 700; color: #1a3a6b; text-align: center; margin-bottom: 4px; }
+    .login-sub   { font-size: 13px; color: #888; text-align: center; margin-bottom: 20px; }
+    .form-label  { font-size: 12px; color: #666; margin-bottom: 6px; display: block; margin-top: 2px; }
+    input[type="password"] { width: 100%; padding: 12px 14px; font-size: 22px; letter-spacing: 8px; border: 1px solid #ccc; border-radius: 8px; font-family: inherit; margin-bottom: 12px; background: #fafafa; text-align: center; }
     input[type="password"]:focus { outline: none; border-color: #1a3a6b; }
-    .login-error { font-size: 15px; color: #c0392b; background: #fff0f0; border: 1px solid #f4a0a0; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+    .login-error { font-size: 13px; color: #c0392b; background: #fff0f0; border: 1px solid #f4a0a0; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
 
     .panel-card { background: #fff; border: 1px solid #c8d5e8; border-radius: 14px; padding: 20px 18px; margin-bottom: 14px; }
     .panel-header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-    .panel-icon  { font-size: 24px; }
-    .panel-title { font-size: 17px; font-weight: 700; flex: 1; }
-    .cur-badge { font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 20px; flex-shrink: 0; }
+    .panel-icon  { font-size: 22px; }
+    .panel-title { font-size: 15px; font-weight: 700; flex: 1; }
+    .cur-badge { font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; flex-shrink: 0; }
     .badge-open   { background: #d8f3dc; color: #1b4332; }
     .badge-closed { background: #ffe0e0; color: #7f1d1d; }
     .badge-notice { background: #fef0c0; color: #7a4f00; }
 
-    .section-label { font-size: 14px; font-weight: 600; color: #555; margin-bottom: 8px; }
+    .section-label { font-size: 12px; font-weight: 600; color: #555; margin-bottom: 8px; }
     .radio-group { display: flex; gap: 8px; margin-bottom: 16px; }
-    .radio-btn { flex: 1; padding: 14px 8px; border: 1px solid #ccc; border-radius: 10px; background: #fff; font-size: 17px; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.15s; }
+    .radio-btn { flex: 1; padding: 14px 8px; border: 1px solid #ccc; border-radius: 10px; background: #fff; font-size: 15px; cursor: pointer; text-align: center; font-family: inherit; transition: all 0.15s; }
     .radio-btn:hover { background: #f5f5f5; }
     .radio-btn.sel-open   { background: #d8f3dc; border-color: #52b788; color: #1b4332; font-weight: 700; }
     .radio-btn.sel-closed { background: #ffe0e0; border-color: #f4a0a0; color: #7f1d1d; font-weight: 700; }
@@ -232,7 +248,7 @@
 
     .divider { border: none; border-top: 1px solid #eee; margin: 4px 0 16px; }
     input[type="text"], textarea, input[type="datetime-local"], input[type="date"] {
-      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc;
+      width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #ccc;
       border-radius: 8px; background: #fafafa; font-family: inherit; margin-bottom: 12px; color: #1a1a1a;
     }
     textarea { min-height: 76px; resize: vertical; }
@@ -240,37 +256,51 @@
     input[type="datetime-local"]:focus, input[type="date"]:focus { outline: none; border-color: #1a3a6b; }
 
     .reopen-mode-group { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
-    .reopen-btn { padding: 9px 6px; border: 1px solid #ccc; border-radius: 8px; background: #fff; font-size: 14px; cursor: pointer; text-align: center; font-family: inherit; color: #555; transition: all 0.15s; }
+    .reopen-btn { padding: 9px 6px; border: 1px solid #ccc; border-radius: 8px; background: #fff; font-size: 12px; cursor: pointer; text-align: center; font-family: inherit; color: #555; transition: all 0.15s; }
     .reopen-btn:hover { background: #f5f5f5; }
     .reopen-selected { background: #e8f0fa; border-color: #4a7ac8; color: #1a3a6b; font-weight: 700; }
-    .reopen-undecided-msg { font-size: 15px; color: #7a4f00; background: #fef0c0; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
-    .auto-note { font-size: 14px; color: #1a3a6b; background: #e8f0fa; border-radius: 8px; padding: 8px 12px; margin-top: -4px; margin-bottom: 12px; line-height: 1.6; }
+    .reopen-undecided-msg { font-size: 13px; color: #7a4f00; background: #fef0c0; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+    .auto-note { font-size: 12px; color: #1a3a6b; background: #e8f0fa; border-radius: 8px; padding: 8px 12px; margin-top: -4px; margin-bottom: 12px; line-height: 1.6; }
 
+    /* スケジュールカード */
     .schedule-card { background: #fff; border: 1px solid #c8d5e8; border-radius: 14px; overflow: hidden; margin-bottom: 14px; }
     .schedule-card-header { display: flex; align-items: center; gap: 8px; padding: 14px 18px; background: #f0f4fa; border-bottom: 1px solid #c8d5e8; }
-    .schedule-card-title { font-size: 16px; font-weight: 700; color: #1a3a6b; flex: 1; }
-    .sch-toggle-btn { font-size: 14px; color: #1a3a6b; background: transparent; border: 1px solid #4a7ac8; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-family: inherit; }
+    .schedule-card-title { font-size: 14px; font-weight: 700; color: #1a3a6b; flex: 1; }
+    .sch-toggle-btn { font-size: 12px; color: #1a3a6b; background: transparent; border: 1px solid #4a7ac8; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-family: inherit; white-space: nowrap; }
 
-    .schedule-active-box { padding: 14px 18px; background: #fffdf0; border-bottom: 1px solid #f0e8c0; }
-    .schedule-active-label { font-size: 13px; font-weight: 700; color: #7a4f00; background: #fef0c0; display: inline-block; padding: 2px 10px; border-radius: 20px; margin-bottom: 10px; }
-    .sch-row { display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 5px; }
-    .sch-dot { font-size: 16px; flex-shrink: 0; }
-    .sch-memo { font-size: 14px; color: #666; margin-top: 6px; padding-left: 4px; }
-    .cancel-btn { width: 100%; margin-top: 10px; padding: 8px; background: #fff; border: 1px solid #f4a0a0; border-radius: 8px; color: #c0392b; font-size: 15px; cursor: pointer; font-family: inherit; }
-    .cancel-btn:hover { background: #fff0f0; }
+    .schedule-list-area { padding: 12px 16px; }
+    .schedule-empty { font-size: 13px; color: #aaa; text-align: center; padding: 8px 0; }
 
-    .schedule-form { padding: 16px 18px; }
-    .sch-section { font-size: 13px; font-weight: 700; color: #888; letter-spacing: 0.08em; margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
+    /* 各スケジュール */
+    .sch-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      background: #f8fbff; border: 1px solid #c8d5e8;
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 8px;
+    }
+    .sch-item-rows { flex: 1; }
+    .sch-row  { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 4px; }
+    .sch-memo { font-size: 12px; color: #666; margin-top: 4px; }
+    .sch-delete-btn {
+      flex-shrink: 0; padding: 5px 10px;
+      background: #fff; border: 1px solid #f4a0a0;
+      border-radius: 6px; color: #c0392b; font-size: 12px;
+      cursor: pointer; font-family: inherit; white-space: nowrap;
+    }
+    .sch-delete-btn:hover { background: #fff0f0; }
+
+    /* 登録フォーム */
+    .schedule-form { padding: 16px 18px; border-top: 1px solid #e8eef8; }
+    .sch-section { font-size: 11px; font-weight: 700; color: #888; letter-spacing: 0.08em; margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #eee; }
     .sch-section:first-child { margin-top: 0; }
-    .sch-optional { font-size: 13px; color: #aaa; font-weight: 400; margin-left: 4px; }
-    .sch-note { font-size: 14px; color: #555; background: #f5f5f5; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
-    .sch-auto-note { font-size: 14px; color: #1a3a6b; background: #e8f0fa; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
+    .sch-optional { font-size: 11px; color: #aaa; font-weight: 400; margin-left: 4px; }
+    .sch-note { font-size: 12px; color: #555; background: #f5f5f5; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
+    .sch-auto-note { font-size: 12px; color: #1a3a6b; background: #e8f0fa; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
 
-    .primary-btn { width: 100%; padding: 13px; border: none; border-radius: 8px; background: #1a3a6b; color: #fff; font-size: 17px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+    .primary-btn { width: 100%; padding: 13px; border: none; border-radius: 8px; background: #1a3a6b; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background 0.15s; }
     .primary-btn:hover    { background: #122a52; }
     .primary-btn:disabled { background: #aaa; cursor: not-allowed; }
 
-    .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1a3a6b; color: #fff; font-size: 16px; padding: 12px 24px; border-radius: 24px; opacity: 0; pointer-events: none; transition: opacity 0.3s; white-space: nowrap; z-index: 9999; }
+    .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1a3a6b; color: #fff; font-size: 14px; padding: 12px 24px; border-radius: 24px; opacity: 0; pointer-events: none; transition: opacity 0.3s; white-space: nowrap; z-index: 9999; }
     .toast.show { opacity: 1; }
   </style>
 </head>
@@ -294,21 +324,23 @@
 
   <div id="panel-section" style="display:none;">
 
+    <!-- スケジュールカード -->
     <div class="schedule-card">
       <div class="schedule-card-header">
         <span style="font-size:18px;">📅</span>
         <span class="schedule-card-title">スケジュール自動切替</span>
-        <button class="sch-toggle-btn" id="sch-toggle-btn" onclick="toggleScheduleForm()">▼ スケジュールを新規登録する</button>
+        <button class="sch-toggle-btn" id="sch-toggle-btn" onclick="toggleScheduleForm()">▼ スケジュールを新規追加する</button>
       </div>
 
-      <div id="schedule-active-box" class="schedule-active-box" style="display:none;">
-        <div class="schedule-active-label">📋 登録中のスケジュール</div>
-        <div id="schedule-active-content"></div>
-        <button class="cancel-btn" onclick="cancelSchedule()">このスケジュールをキャンセルする</button>
+      <!-- 登録済み一覧 -->
+      <div class="schedule-list-area">
+        <div id="schedule-list-box"></div>
+        <div id="schedule-empty" class="schedule-empty">登録中のスケジュールはありません</div>
       </div>
 
+      <!-- 登録フォーム -->
       <div id="schedule-form" class="schedule-form" style="display:none;">
-        <div class="sch-note">停止開始・復旧の日時を登録すると、index.html が自動でステータスを切り替えます。予告開始は省略可能です。</div>
+        <div class="sch-note">停止開始・復旧の日時を登録すると自動でステータスが切り替わります。予告開始は省略可能。複数件登録できます。</div>
 
         <div class="sch-section">📢 予告開始日時 <span class="sch-optional">（任意）</span></div>
         <input type="datetime-local" id="sch-notice-at" step="300" />
@@ -328,6 +360,7 @@
       </div>
     </div>
 
+    <!-- 手動ステータス更新カード -->
     <div class="panel-card">
       <div class="panel-header">
         <span class="panel-icon">🏛️</span>
