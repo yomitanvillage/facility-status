@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>草木資源化施設　管理者画面</title>
+  <title>ごみ収集・草木資源化施設　管理者画面</title>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
@@ -24,9 +24,11 @@
     const db          = getDatabase(initializeApp(firebaseConfig));
     const svcRef      = ref(db, "services/" + SERVICE_ID);
     const schRef      = ref(db, "schedules/" + SERVICE_ID);
+    const gomiRef     = ref(db, "services/gomi");
 
     let loggedIn       = false;
     let selectedStatus = "open";
+    let gomiSelected    = "open";
 
     // ──── ログイン ────
     window.doLogin = () => {
@@ -36,6 +38,7 @@
         document.getElementById("panel-section").style.display = "block";
         loadCurrent();
         loadSchedule();
+        loadGomi();
       } else {
         document.getElementById("login-error").style.display = "block";
         document.getElementById("pw-input").value = "";
@@ -86,6 +89,46 @@
     }
     function esc(s) {
       return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+    }
+
+    // ──── ごみ収集 ────
+    function loadGomi() {
+      onValue(gomiRef, (snap) => {
+        const d = snap.val() || { status: "open" };
+        selectGomiStatus(d.status);
+        document.getElementById("gomi-period-input").value = d.period || "";
+        document.getElementById("gomi-reason-input").value = d.reason || "";
+        setGomiBadge(d.status);
+      }, { onlyOnce: true });
+    }
+
+    window.selectGomiStatus = (s) => {
+      gomiSelected = s;
+      document.getElementById("gomi-btn-open").className   = "radio-btn" + (s === "open"   ? " sel-open"   : "");
+      document.getElementById("gomi-btn-closed").className = "radio-btn" + (s === "closed" ? " sel-closed" : "");
+      document.getElementById("gomi-closed-fields").style.display = s === "closed" ? "block" : "none";
+    };
+
+    window.doGomiUpdate = async () => {
+      const btn = document.getElementById("gomi-update-btn");
+      btn.disabled = true; btn.textContent = "更新中...";
+      try {
+        await set(gomiRef, {
+          status: gomiSelected,
+          period: gomiSelected === "closed" ? document.getElementById("gomi-period-input").value.trim() : "",
+          reason: gomiSelected === "closed" ? document.getElementById("gomi-reason-input").value.trim() : "",
+          updatedAt: new Date().toISOString()
+        });
+        setGomiBadge(gomiSelected);
+        showToast("ごみ収集のステータスを更新しました ✓");
+      } catch (e) { showToast("更新に失敗しました"); }
+      finally { btn.disabled = false; btn.textContent = "ごみ収集のステータスを更新する"; }
+    };
+
+    function setGomiBadge(s) {
+      const b = document.getElementById("gomi-current-badge");
+      if (s === "open") { b.textContent = "現在：稼働中"; b.className = "cur-badge badge-open"; }
+      else              { b.textContent = "現在：停止中"; b.className = "cur-badge badge-closed"; }
     }
 
     // ──── スケジュール登録 ────
@@ -292,7 +335,7 @@
 </head>
 <body>
 <header>
-  <h1>🌿 草木資源化施設　管理者画面</h1>
+  <h1>🌿 ごみ収集・草木資源化施設　管理者画面</h1>
   <span class="header-tag">管理者専用</span>
 </header>
 <div class="app">
@@ -301,7 +344,7 @@
   <div id="login-section">
     <div class="login-box">
       <div class="login-title">管理者ログイン</div>
-      <div class="login-sub">草木資源化施設 担当者専用</div>
+      <div class="login-sub">ごみ収集・草木資源化施設 担当者専用</div>
       <label class="form-label">パスワード</label>
       <input type="password" id="pw-input" placeholder="・・・・" maxlength="10" />
       <div class="login-error" id="login-error" style="display:none;">パスワードが違います</div>
@@ -346,6 +389,28 @@
 
         <button class="primary-btn sch-register-btn" id="sch-register-btn" onclick="registerSchedule()">スケジュールを登録する</button>
       </div>
+    </div>
+
+    <!-- ═══ ごみ収集カード ═══ -->
+    <div class="panel-card">
+      <div class="panel-header">
+        <span class="panel-icon">🗑️</span>
+        <span class="panel-title">ごみ収集</span>
+        <span class="cur-badge badge-open" id="gomi-current-badge">現在：確認中</span>
+      </div>
+      <div class="section-label">新しいステータスを選択</div>
+      <div class="radio-group">
+        <button class="radio-btn sel-open" id="gomi-btn-open"   onclick="selectGomiStatus('open')">🌿 稼働中</button>
+        <button class="radio-btn"          id="gomi-btn-closed" onclick="selectGomiStatus('closed')">🚫 停止中</button>
+      </div>
+      <div id="gomi-closed-fields" style="display:none;">
+        <hr class="divider" />
+        <label class="form-label">停止期間（任意）</label>
+        <input type="text" id="gomi-period-input" placeholder="例：4月20日（日）終日" />
+        <label class="form-label">停止理由（任意）</label>
+        <textarea id="gomi-reason-input" placeholder="例：台風接近のため収集を見合わせます"></textarea>
+      </div>
+      <button class="primary-btn" id="gomi-update-btn" onclick="doGomiUpdate()">ごみ収集のステータスを更新する</button>
     </div>
 
     <!-- ═══ 手動ステータス更新カード ═══ -->
