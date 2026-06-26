@@ -34,7 +34,10 @@
 
     // ──── ごみ収集ステータスを購読 ────
     onValue(ref(db, "services/gomi"), (snap) => {
-      renderGomiStatus(snap.val() || { status: "open" });
+      const d = snap.val() || { status: "open" };
+      latestGomi = d;
+      renderGomiStatus(d);
+      checkGomi();
     });
 
     function renderGomiStatus(d) {
@@ -44,16 +47,28 @@
       badge.className   = "gomi-status-badge " + (isOpen ? "gsb-open" : "gsb-closed");
 
       const detail = document.getElementById("gomi-status-detail");
-      if (!isOpen && (d.period || d.reason)) {
+      if (!isOpen && (d.period || d.reason || d.reopen_mode)) {
         let html = "";
         if (d.period) html += `<div class="detail-row"><span class="detail-label">停止期間</span><span class="detail-val">${escGomi(d.period)}</span></div>`;
         if (d.reason) html += `<div class="detail-row"><span class="detail-label">停止理由</span><span class="detail-val">${escGomi(d.reason)}</span></div>`;
+        const reopenStr = fmtGomiReopen(d);
+        if (reopenStr) html += `<div class="detail-row"><span class="detail-label">再開予定</span><span class="detail-val">${escGomi(reopenStr)}</span></div>`;
         detail.innerHTML = html;
-        detail.dataset.hasInfo = "1";
+        detail.dataset.hasInfo = html ? "1" : "0";
       } else {
         detail.innerHTML = "";
         detail.dataset.hasInfo = "0";
       }
+    }
+
+    function fmtGomiReopen(d) {
+      const mode = d.reopen_mode || "none";
+      if (mode === "undecided") return "未定";
+      if (mode === "none" || !d.reopen) return "";
+      const dt = new Date(d.reopen);
+      const dateStr = dt.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+      if (mode === "dateonly") return dateStr + "（時間未定）";
+      return dateStr + " " + dt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) + " 頃";
     }
 
     function escGomi(s) {
@@ -200,6 +215,24 @@
 
     setInterval(checkAll, 60 * 1000);
     checkAll(); // ページ読み込み直後にも即チェック
+
+    // ──── ごみ収集の自動切替チェック ────
+    let latestGomi = null;
+    async function checkGomi() {
+      const now = Date.now();
+      const d = latestGomi;
+      if (d && d.status === "closed" && d.reopen_mode === "datetime" && d.reopen) {
+        if (now >= new Date(d.reopen).getTime()) {
+          try {
+            await set(ref(db, "services/gomi"), {
+              status: "open", period: "", reason: "", reopen: "", reopen_mode: "none",
+              updatedAt: new Date().toISOString()
+            });
+          } catch (e) { console.warn("ごみ収集自動切替失敗:", e); }
+        }
+      }
+    }
+    setInterval(checkGomi, 60 * 1000);
 
     // ──── ステータス描画 ────
     function renderStatus(id, d) {
