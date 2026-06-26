@@ -32,6 +32,41 @@
     const serviceIds = ["kusaki", "conveni"];
     const latestData = {};
 
+    // ──── ごみ収集ステータスを購読 ────
+    onValue(ref(db, "services/gomi"), (snap) => {
+      renderGomiStatus(snap.val() || { status: "open" });
+    });
+
+    function renderGomiStatus(d) {
+      const isOpen = d.status === "open";
+      const badge  = document.getElementById("gomi-status-badge");
+      badge.textContent = isOpen ? "稼働中" : "停止中";
+      badge.className   = "gomi-status-badge " + (isOpen ? "gsb-open" : "gsb-closed");
+
+      const detail = document.getElementById("gomi-status-detail");
+      if (!isOpen && (d.period || d.reason)) {
+        let html = "";
+        if (d.period) html += `<div class="detail-row"><span class="detail-label">停止期間</span><span class="detail-val">${escGomi(d.period)}</span></div>`;
+        if (d.reason) html += `<div class="detail-row"><span class="detail-label">停止理由</span><span class="detail-val">${escGomi(d.reason)}</span></div>`;
+        detail.innerHTML = html;
+        detail.dataset.hasInfo = "1";
+      } else {
+        detail.innerHTML = "";
+        detail.dataset.hasInfo = "0";
+      }
+    }
+
+    function escGomi(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+    }
+
+    window.toggleGomiStatusDetail = () => {
+      const detail = document.getElementById("gomi-status-detail");
+      if (detail.dataset.hasInfo !== "1") return; // 稼働中など詳細がない場合は何もしない
+      const open = detail.style.display === "none" || detail.style.display === "";
+      detail.style.display = open ? "block" : "none";
+    };
+
     // ──── 各サービスをリアルタイム購読 ────
     serviceIds.forEach(id => {
       onValue(ref(db, "services/" + id), (snap) => {
@@ -318,6 +353,22 @@
       border-bottom: 1px solid #eee;
     }
     .gomi-title { font-size: 17px; font-weight: 700; flex: 1; color: #1a1a1a; }
+
+    /* ごみ収集ステータスバッジ */
+    .gomi-status-badge {
+      font-size: 13px; font-weight: 700;
+      padding: 5px 14px; border-radius: 20px; flex-shrink: 0;
+    }
+    .gsb-open   { background: #d8f3dc; color: #1b4332; }
+    .gsb-closed { background: #ffe0e0; color: #7f1d1d; animation: gomi-pulse-closed 1.2s ease-in-out infinite; }
+    @keyframes gomi-pulse-closed { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+    .gomi-status-detail {
+      padding: 10px 16px 12px 48px;
+      background: #fffaf9;
+      border-bottom: 1px solid #f0e0e0;
+    }
+
     .gomi-body  { padding: 12px 14px; }
     .gomi-area-label { font-size: 14px; color: #666; margin-bottom: 6px; display: block; }
     .gomi-select {
@@ -399,10 +450,12 @@
 
   <!-- ごみ収集日カード -->
   <div class="gomi-card">
-    <div class="gomi-header">
+    <div class="gomi-header" onclick="toggleGomiStatusDetail()" style="cursor:pointer;">
       <span style="font-size:22px;">🗑️</span>
       <span class="gomi-title">ごみ収集日（直近3日）</span>
+      <span class="gomi-status-badge gsb-open" id="gomi-status-badge">確認中</span>
     </div>
+    <div class="gomi-status-detail" id="gomi-status-detail" style="display:none;" data-has-info="0"></div>
     <div class="gomi-body">
       <span class="gomi-area-label">お住まいのエリアを選択</span>
       <select class="gomi-select" id="area-sel" onchange="saveArea();renderGomi()">
