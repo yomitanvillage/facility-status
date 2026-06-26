@@ -98,6 +98,10 @@
         selectGomiStatus(d.status);
         document.getElementById("gomi-period-input").value = d.period || "";
         document.getElementById("gomi-reason-input").value = d.reason || "";
+        const mode = d.reopen_mode || "none";
+        setGomiReopenMode(mode);
+        if (mode === "datetime" && d.reopen) document.getElementById("gomi-reopen-datetime").value = toLocal(d.reopen);
+        if (mode === "dateonly"  && d.reopen) document.getElementById("gomi-reopen-date").value     = d.reopen.slice(0, 10);
         setGomiBadge(d.status);
       }, { onlyOnce: true });
     }
@@ -109,14 +113,37 @@
       document.getElementById("gomi-closed-fields").style.display = s === "closed" ? "block" : "none";
     };
 
+    window.setGomiReopenMode = (mode) => {
+      document.getElementById("gomi-reopen-mode").value = mode;
+      document.getElementById("gomi-reopen-datetime-wrap").style.display = mode === "datetime"  ? "block" : "none";
+      document.getElementById("gomi-reopen-date-wrap").style.display     = mode === "dateonly"  ? "block" : "none";
+      document.getElementById("gomi-reopen-undecided-msg").style.display = mode === "undecided" ? "block" : "none";
+      ["none","datetime","dateonly","undecided"].forEach(m => {
+        const el = document.getElementById("gomi-reopen-btn-" + m);
+        if (el) el.className = "reopen-btn" + (mode === m ? " reopen-selected" : "");
+      });
+    };
+
     window.doGomiUpdate = async () => {
       const btn = document.getElementById("gomi-update-btn");
       btn.disabled = true; btn.textContent = "更新中...";
+      const mode = document.getElementById("gomi-reopen-mode").value;
+      let reopenVal = "", reopenMode = "none";
+      if (gomiSelected === "closed") {
+        if (mode === "datetime") {
+          const raw = document.getElementById("gomi-reopen-datetime").value;
+          reopenVal = raw ? new Date(raw).toISOString() : ""; reopenMode = raw ? "datetime" : "none";
+        } else if (mode === "dateonly") {
+          reopenVal = document.getElementById("gomi-reopen-date").value || ""; reopenMode = reopenVal ? "dateonly" : "none";
+        } else if (mode === "undecided") { reopenMode = "undecided"; }
+      }
       try {
         await set(gomiRef, {
           status: gomiSelected,
           period: gomiSelected === "closed" ? document.getElementById("gomi-period-input").value.trim() : "",
           reason: gomiSelected === "closed" ? document.getElementById("gomi-reason-input").value.trim() : "",
+          reopen: reopenVal,
+          reopen_mode: gomiSelected === "closed" ? reopenMode : "none",
           updatedAt: new Date().toISOString()
         });
         setGomiBadge(gomiSelected);
@@ -409,6 +436,24 @@
         <input type="text" id="gomi-period-input" placeholder="例：4月20日（日）終日" />
         <label class="form-label">停止理由（任意）</label>
         <textarea id="gomi-reason-input" placeholder="例：台風接近のため収集を見合わせます"></textarea>
+        <label class="form-label">再開予定</label>
+        <div class="reopen-mode-group">
+          <button class="reopen-btn reopen-selected" id="gomi-reopen-btn-none"      onclick="setGomiReopenMode('none')">設定しない</button>
+          <button class="reopen-btn"                 id="gomi-reopen-btn-datetime"  onclick="setGomiReopenMode('datetime')">日時を指定（5分単位）</button>
+          <button class="reopen-btn"                 id="gomi-reopen-btn-dateonly"  onclick="setGomiReopenMode('dateonly')">日付のみ</button>
+          <button class="reopen-btn"                 id="gomi-reopen-btn-undecided" onclick="setGomiReopenMode('undecided')">未定</button>
+        </div>
+        <input type="hidden" id="gomi-reopen-mode" value="none" />
+        <div id="gomi-reopen-datetime-wrap" style="display:none;">
+          <input type="datetime-local" id="gomi-reopen-datetime" step="300" />
+          <div class="auto-note">⏱ 設定した日時を過ぎると、利用者画面が自動で「稼働中」に切り替わります</div>
+        </div>
+        <div id="gomi-reopen-date-wrap" style="display:none;">
+          <input type="date" id="gomi-reopen-date" />
+        </div>
+        <div id="gomi-reopen-undecided-msg" class="reopen-undecided-msg" style="display:none;">
+          復旧日時：未定　と表示されます
+        </div>
       </div>
       <button class="primary-btn" id="gomi-update-btn" onclick="doGomiUpdate()">ごみ収集のステータスを更新する</button>
     </div>
