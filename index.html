@@ -14,34 +14,49 @@
     gtag('config', 'G-ZGZF9RQER9');
   </script>
 
+  <script src="config.js"></script>
+  <script src="status-engine.js"></script>
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getDatabase, ref, set, remove, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+    // ════════════════════════════════════════════════════════════
+    //  閲覧ページ：データベースは「読むだけ」。状態は表示側で計算する。
+    // ════════════════════════════════════════════════════════════
+    const C = window.FS_CONFIG, FS = window.FS;
+    const IDS = C.services.map(s => s.id);           // gomi / kusaki / conveni
+    const manual = {}, scheds = {};
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyDNdtr1D4GhzQ7aWoBlAFYkTGLioPlk4io",
-      authDomain: "yomitan-facility-status.firebaseapp.com",
-      databaseURL: "https://yomitan-facility-status-default-rtdb.asia-southeast1.firebasedatabase.app",
-      projectId: "yomitan-facility-status",
-      storageBucket: "yomitan-facility-status.firebasestorage.app",
-      messagingSenderId: "518782906626",
-      appId: "1:518782906626:web:46d3da5ec985eb6e97121b"
-    };
+    function renderAll() {
+      const now = Date.now();
+      IDS.forEach(id => {
+        const d = FS.effective(manual[id], scheds[id], now);
+        if (id === "gomi") renderGomiStatus(d); else renderStatus(id, d);
+      });
+    }
 
-    const db = getDatabase(initializeApp(firebaseConfig));
-    const serviceIds = ["kusaki", "conveni"];
-    const latestData = {};
+    // ── データ取得 ──
+    if (C.demo) {
+      const load = () => {
+        let db = {};
+        try { db = JSON.parse(localStorage.getItem("fs_demo_db")) || {}; } catch (e) {}
+        IDS.forEach(id => { manual[id] = (db.services || {})[id]; scheds[id] = (db.schedules_list || {})[id]; });
+        renderAll();
+      };
+      window.addEventListener("storage", e => { if (e.key === "fs_demo_db") load(); });
+      load();
+    } else {
+      const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js");
+      const { getDatabase, ref, onValue } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+      const db = getDatabase(initializeApp(C.firebaseConfig));
+      IDS.forEach(id => {
+        onValue(ref(db, "services/" + id), snap => { manual[id] = snap.val(); renderAll(); });
+        onValue(ref(db, "schedules_list/" + id), snap => { scheds[id] = snap.val(); renderAll(); });
+      });
+    }
+    // 予定時刻の切り替わりを反映するため30秒ごとに再計算（書き込みはしない）
+    setInterval(renderAll, 30 * 1000);
 
-    // ──── ごみ収集ステータスを購読 ────
-    onValue(ref(db, "services/gomi"), (snap) => {
-      const d = snap.val() || { status: "open" };
-      latestGomi = d;
-      renderGomiStatus(d);
-      checkGomi();
-    });
-
+    // ──── ごみ収集ステータス描画 ────
     function renderGomiStatus(d) {
-      const isOpen = d.status === "open";
+      const isOpen = d.status !== "closed";
       const badge  = document.getElementById("gomi-status-badge");
       badge.textContent = isOpen ? "稼働中" : "停止中";
       badge.className   = "gomi-status-badge " + (isOpen ? "gsb-open" : "gsb-closed");
@@ -49,235 +64,53 @@
       const detail = document.getElementById("gomi-status-detail");
       if (!isOpen && (d.period || d.reason || d.reopen_mode)) {
         let html = "";
-        if (d.period) html += `<div class="detail-row"><span class="detail-label">停止期間</span><span class="detail-val">${escGomi(d.period)}</span></div>`;
-        if (d.reason) html += `<div class="detail-row"><span class="detail-label">停止理由</span><span class="detail-val">${escGomi(d.reason)}</span></div>`;
-        const reopenStr = fmtGomiReopen(d);
-        if (reopenStr) html += `<div class="detail-row"><span class="detail-label">再開予定</span><span class="detail-val">${escGomi(reopenStr)}</span></div>`;
+        if (d.period) html += detailRow("停止期間", d.period);
+        if (d.reason) html += detailRow("停止理由", d.reason);
+        html += detailRow("再開予定", FS.fmtReopen(d));
         detail.innerHTML = html;
         detail.dataset.hasInfo = html ? "1" : "0";
       } else {
         detail.innerHTML = "";
         detail.dataset.hasInfo = "0";
+        detail.style.display = "none";
       }
-    }
-
-    function fmtGomiReopen(d) {
-      const mode = d.reopen_mode || "none";
-      if (mode === "undecided") return "未定";
-      if (mode === "none" || !d.reopen) return "";
-      const dt = new Date(d.reopen);
-      const dateStr = dt.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
-      if (mode === "dateonly") return dateStr + "（時間未定）";
-      return dateStr + " " + dt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) + " 頃";
-    }
-
-    function escGomi(s) {
-      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
     }
 
     window.toggleGomiStatusDetail = () => {
       const detail = document.getElementById("gomi-status-detail");
-      if (detail.dataset.hasInfo !== "1") return; // 稼働中など詳細がない場合は何もしない
+      if (detail.dataset.hasInfo !== "1") return;
       const open = detail.style.display === "none" || detail.style.display === "";
       detail.style.display = open ? "block" : "none";
     };
 
-    // ──── 各サービスをリアルタイム購読 ────
-    serviceIds.forEach(id => {
-      onValue(ref(db, "services/" + id), (snap) => {
-        const d = snap.val() || { status: "open" };
-        latestData[id] = d;
-        renderStatus(id, d);
-      });
-    });
-
-    // ──── 60秒ごと：スケジュール & 手動再開予定の両方をチェック ────
-    async function checkAll() {
-      const now = Date.now();
-      for (const id of serviceIds) {
-
-        // ① schedules_list（複数スケジュール：conveni用）をチェック
-        const schListSnap = await new Promise(resolve =>
-          onValue(ref(db, "schedules_list/" + id), resolve, { onlyOnce: true })
-        );
-        const schList = schListSnap.val();
-        if (schList) {
-          // 停止開始時刻順にソートして、現在該当するスケジュールを探す
-          const entries = Object.entries(schList).sort((a, b) =>
-            new Date(a[1].closedAt) - new Date(b[1].closedAt)
-          );
-          let handled = false;
-          for (const [key, s] of entries) {
-            // 復旧日時を過ぎた → 稼働中に戻してこのスケジュールを削除
-            if (s.reopenAt && now >= new Date(s.reopenAt).getTime()) {
-              try {
-                await set(ref(db, "services/" + id), {
-                  status: "open", period: "", reason: "", reopen: "", reopen_mode: "none",
-                  notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
-                });
-                await remove(ref(db, "schedules_list/" + id + "/" + key));
-              } catch (e) { console.warn("復旧失敗:", id, key, e); }
-              handled = true; continue;
-            }
-            // 停止開始日時を過ぎた → 停止中に切替
-            if (s.closedAt && now >= new Date(s.closedAt).getTime()) {
-              const d = latestData[id];
-              if (d && d.status !== "closed") {
-                try {
-                  await set(ref(db, "services/" + id), {
-                    status: "closed", period: "", reason: s.reason || "",
-                    reopen: s.reopenAt || "", reopen_mode: s.reopenAt ? "datetime" : "none",
-                    notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
-                  });
-                } catch (e) { console.warn("停止切替失敗:", id, key, e); }
-              }
-              handled = true; break;
-            }
-            // 予告開始日時を過ぎた → 予告に切替
-            if (s.noticeAt && now >= new Date(s.noticeAt).getTime()) {
-              const d = latestData[id];
-              if (d && d.status !== "notice" && d.status !== "closed") {
-                try {
-                  await set(ref(db, "services/" + id), {
-                    status: "notice", period: "", reason: "",
-                    reopen: "", reopen_mode: "none",
-                    notice_period: "", notice_msg: s.noticeMsg || "",
-                    updatedAt: new Date().toISOString()
-                  });
-                } catch (e) { console.warn("予告切替失敗:", id, key, e); }
-              }
-              handled = true; break;
-            }
-          }
-          if (handled) continue;
-        }
-
-        // ② schedules（単数スケジュール：kusaki用）をチェック
-        const schSnap = await new Promise(resolve =>
-          onValue(ref(db, "schedules/" + id), resolve, { onlyOnce: true })
-        );
-        const sch = schSnap.val();
-        if (sch && sch.active) {
-          if (sch.reopenAt && now >= new Date(sch.reopenAt).getTime()) {
-            try {
-              await set(ref(db, "services/" + id), {
-                status: "open", period: "", reason: "", reopen: "", reopen_mode: "none",
-                notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
-              });
-              await set(ref(db, "schedules/" + id), { active: false });
-            } catch (e) { console.warn("スケジュール復旧失敗:", id, e); }
-            continue;
-          }
-          if (sch.closedAt && now >= new Date(sch.closedAt).getTime()) {
-            const d = latestData[id];
-            if (d && d.status !== "closed") {
-              try {
-                await set(ref(db, "services/" + id), {
-                  status: "closed", period: "", reason: sch.reason || "",
-                  reopen: sch.reopenAt || "", reopen_mode: sch.reopenAt ? "datetime" : "none",
-                  notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
-                });
-              } catch (e) { console.warn("スケジュール停止失敗:", id, e); }
-            }
-            continue;
-          }
-          if (sch.noticeAt && now >= new Date(sch.noticeAt).getTime()) {
-            const d = latestData[id];
-            if (d && d.status !== "notice" && d.status !== "closed") {
-              try {
-                await set(ref(db, "services/" + id), {
-                  status: "notice", period: "", reason: "",
-                  reopen: "", reopen_mode: "none",
-                  notice_period: "", notice_msg: sch.noticeMsg || "",
-                  updatedAt: new Date().toISOString()
-                });
-              } catch (e) { console.warn("スケジュール予告失敗:", id, e); }
-            }
-            continue;
-          }
-          continue;
-        }
-
-        // ③ 手動の再開予定日時チェック
-        const d = latestData[id];
-        if (d && d.status === "closed" && d.reopen_mode === "datetime" && d.reopen) {
-          if (now >= new Date(d.reopen).getTime()) {
-            try {
-              await set(ref(db, "services/" + id), {
-                status: "open", period: "", reason: "", reopen: "", reopen_mode: "none",
-                notice_period: "", notice_msg: "", updatedAt: new Date().toISOString()
-              });
-            } catch (e) { console.warn("手動再開切替失敗:", id, e); }
-          }
-        }
-      }
-    }
-
-    setInterval(checkAll, 60 * 1000);
-    checkAll(); // ページ読み込み直後にも即チェック
-
-    // ──── ごみ収集の自動切替チェック ────
-    let latestGomi = null;
-    async function checkGomi() {
-      const now = Date.now();
-      const d = latestGomi;
-      if (d && d.status === "closed" && d.reopen_mode === "datetime" && d.reopen) {
-        if (now >= new Date(d.reopen).getTime()) {
-          try {
-            await set(ref(db, "services/gomi"), {
-              status: "open", period: "", reason: "", reopen: "", reopen_mode: "none",
-              updatedAt: new Date().toISOString()
-            });
-          } catch (e) { console.warn("ごみ収集自動切替失敗:", e); }
-        }
-      }
-    }
-    setInterval(checkGomi, 60 * 1000);
-
-    // ──── ステータス描画 ────
+    // ──── 草木・コンビニ ステータス描画 ────
     function renderStatus(id, d) {
-      const isOpen   = d.status === "open";
       const isNotice = d.status === "notice";
       const isClosed = d.status === "closed";
       const card     = document.getElementById("card-" + id);
-
-      if (isOpen)   card.className = "svc-card open";
-      if (isNotice) card.className = "svc-card notice";
-      if (isClosed) card.className = "svc-card closed";
+      if (!card) return;
+      card.className = "svc-card " + (isClosed ? "closed" : isNotice ? "notice" : "open");
 
       const badge = document.getElementById("badge-" + id);
-      if (isOpen || isNotice) {
-        badge.textContent = "稼働中";
-        badge.className   = "svc-badge badge-open";
-      } else {
-        badge.textContent = "停止中";
-        badge.className   = "svc-badge badge-closed pulse-closed";
-      }
-
-      const iconEl = document.getElementById("icon-" + id);
-      iconEl.className = "status-icon";
+      if (!isClosed) { badge.textContent = "稼働中"; badge.className = "svc-badge badge-open"; }
+      else           { badge.textContent = "停止中"; badge.className = "svc-badge badge-closed pulse-closed"; }
 
       const info = document.getElementById("info-" + id);
-
-      // 停止予告
       if (isNotice && (d.notice_period || d.notice_msg)) {
         let html = '<div class="notice-bar">📢 停止予告</div>';
-        if (d.notice_period) html += detailRow("予告期間", d.notice_period);
-        if (d.notice_msg)    html += detailRow("内容",     d.notice_msg);
+        html += detailRow("予告期間", d.notice_period);
+        html += detailRow("内容", d.notice_msg);
         info.innerHTML = html;
         info.className = "stop-info notice-info";
         info.style.display = "block";
-
-      // 停止中
       } else if (isClosed && (d.period || d.reason || d.reopen_mode)) {
         let html = "";
-        if (d.period) html += detailRow("停止期間", d.period);
-        if (d.reason) html += detailRow("停止理由", d.reason);
-        html += detailRow("再開予定", fmtReopen(d));
+        html += detailRow("停止期間", d.period);
+        html += detailRow("停止理由", d.reason);
+        html += detailRow("再開予定", FS.fmtReopen(d));
         info.innerHTML = html;
         info.className = "stop-info";
-        info.style.display = "block";
-
+        info.style.display = html ? "block" : "none";
       } else {
         info.style.display = "none";
       }
@@ -285,26 +118,7 @@
 
     function detailRow(label, val) {
       if (!val) return "";
-      return `<div class="detail-row">
-        <span class="detail-label">${label}</span>
-        <span class="detail-val">${esc(val)}</span>
-      </div>`;
-    }
-
-    // 再開予定の表示文字列を生成
-    function fmtReopen(d) {
-      const mode = d.reopen_mode || "none";
-      if (mode === "undecided") return "未定";
-      if (mode === "none" || !d.reopen) return "";
-      const dt = new Date(d.reopen);
-      const dateStr = dt.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
-      if (mode === "dateonly") return dateStr + "（時間未定）";
-      return dateStr + " " + dt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) + " 頃";
-    }
-
-    function esc(s) {
-      return String(s).replace(/[&<>"']/g, c =>
-        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      return `<div class="detail-row"><span class="detail-label">${label}</span><span class="detail-val">${FS.esc(val)}</span></div>`;
     }
 
     window.toggleDetail = (id) => {
