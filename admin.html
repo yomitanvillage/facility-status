@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>サービス稼働状況 管理画面</title>
+  <script src="config.js"></script>
+  <script src="status-engine.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif; background: #f0f4f0; color: #1a1a1a; min-height: 100vh; }
+    header { background: #1b4332; color: #fff; padding: 12px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    header h1 { font-size: 17px; font-weight: 700; flex: 1; }
+    .who { font-size: 13px; background: rgba(255,255,255,.18); padding: 4px 10px; border-radius: 20px; }
+    .hbtn { font-size: 13px; color: #fff; background: transparent; border: 1px solid rgba(255,255,255,.5); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-family: inherit; }
+    .app { max-width: 520px; margin: 0 auto; padding: 16px; }
+
+    .box { background: #fff; border: 1px solid #d0e0d5; border-radius: 14px; padding: 20px 18px; margin-bottom: 14px; }
+    .box-title { font-size: 17px; font-weight: 700; color: #1b4332; margin-bottom: 14px; }
+    label.lb { display: block; font-size: 14px; color: #555; margin: 2px 0 6px; font-weight: 600; }
+    .req { color: #c0392b; font-size: 12px; margin-left: 4px; } .opt { color: #999; font-size: 12px; font-weight: 400; margin-left: 4px; }
+    input[type=text], input[type=email], input[type=password], input[type=date], input[type=datetime-local], textarea {
+      width: 100%; padding: 10px 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; background: #fafafa; font-family: inherit; margin-bottom: 12px; color: #1a1a1a; }
+    textarea { min-height: 64px; resize: vertical; }
+    input:focus, textarea:focus { outline: none; border-color: #2d6a4f; background: #fff; }
+    .btn { display: inline-block; padding: 12px 16px; border: none; border-radius: 8px; background: #2d6a4f; color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .btn:disabled { background: #aaa; cursor: not-allowed; }
+    .btn.full { width: 100%; }
+    .btn.sub { background: #fff; color: #2d6a4f; border: 1px solid #52b788; }
+    .btn.navy { background: #1a3a6b; }
+    .btn.danger { background: #fff; color: #c0392b; border: 1px solid #f4a0a0; }
+    .btn.sm { padding: 6px 12px; font-size: 14px; font-weight: 600; }
+    .link { background: none; border: none; color: #1a3a6b; text-decoration: underline; cursor: pointer; font: inherit; font-size: 14px; }
+    .err { font-size: 14px; color: #7f1d1d; background: #fff0f0; border: 1px solid #f4a0a0; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; }
+    .hint { font-size: 13px; color: #666; line-height: 1.6; }
+
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+    .tab { flex: 1; padding: 10px; border: 1px solid #c8d8cd; background: #fff; border-radius: 10px; font-size: 15px; cursor: pointer; font-family: inherit; }
+    .tab.on { background: #1b4332; color: #fff; border-color: #1b4332; font-weight: 700; }
+
+    .svc { background: #fff; border: 1px solid #d0e0d5; border-radius: 14px; margin-bottom: 16px; overflow: hidden; }
+    .svc-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid #e3ece6; }
+    .svc-icon { font-size: 22px; } .svc-name { font-size: 17px; font-weight: 700; flex: 1; }
+    .cur { font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 20px; }
+    .cur-open { background: #d8f3dc; color: #1b4332; } .cur-closed { background: #ffe0e0; color: #7f1d1d; } .cur-notice { background: #fef0c0; color: #7a4f00; }
+    .svc-note { font-size: 13px; padding: 8px 16px; background: #fffdf0; color: #7a4f00; border-bottom: 1px solid #f0e8c0; line-height: 1.6; }
+    .svc-meta { font-size: 12px; color: #888; padding: 6px 16px 0; }
+    .sec { padding: 14px 16px 16px; }
+    .sec + .sec { border-top: 1px solid #eef2ef; }
+    .sec-title { font-size: 14px; font-weight: 700; color: #1b4332; margin-bottom: 10px; }
+
+    .radio-group { display: flex; gap: 8px; margin-bottom: 14px; }
+    .radio-btn { flex: 1; padding: 13px 6px; border: 1px solid #ccc; border-radius: 10px; background: #fff; font-size: 16px; cursor: pointer; font-family: inherit; }
+    .radio-btn.sel-open { background: #d8f3dc; border-color: #52b788; color: #1b4332; font-weight: 700; }
+    .radio-btn.sel-closed { background: #ffe0e0; border-color: #f4a0a0; color: #7f1d1d; font-weight: 700; }
+    .radio-btn.sel-notice { background: #fef3dc; border-color: #e8b84b; color: #7a4f00; font-weight: 700; }
+    .reopen-group { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+    .reopen-btn { padding: 9px 6px; border: 1px solid #ccc; border-radius: 8px; background: #fff; font-size: 14px; cursor: pointer; font-family: inherit; color: #555; }
+    .reopen-btn.on { background: #e8f4ed; border-color: #52b788; color: #1b4332; font-weight: 700; }
+    .auto-note { font-size: 13px; color: #1b4332; background: #e8f4ed; border-radius: 8px; padding: 8px 12px; margin: -4px 0 12px; line-height: 1.6; }
+
+    .sch { border: 1px solid #e3e8e4; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: 14px; line-height: 1.7; }
+    .sch.active { border-color: #f4a0a0; background: #fff8f8; }
+    .sch.noticing { border-color: #e8b84b; background: #fffbf0; }
+    .sch-tag { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 20px; margin-right: 4px; }
+    .t-active { background: #ffe0e0; color: #7f1d1d; } .t-notice { background: #fef0c0; color: #7a4f00; } .t-wait { background: #e8eef8; color: #1a3a6b; }
+    .sch-memo { color: #666; font-size: 13px; }
+    .sch-form { background: #f6f9f7; border-radius: 10px; padding: 12px; margin-top: 8px; }
+
+    .hist { background: #fff; border: 1px solid #d0e0d5; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: 14px; line-height: 1.6; }
+    .hist b { color: #1b4332; } .hist .ch { color: #666; font-size: 13px; }
+    .empty { background: #fff; border: 1px dashed #c8d8cd; border-radius: 12px; padding: 18px; text-align: center; color: #666; font-size: 14px; }
+    .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); background: #1b4332; color: #fff; font-size: 15px; padding: 12px 22px; border-radius: 24px; opacity: 0; pointer-events: none; transition: opacity .3s; z-index: 9999; max-width: 90vw; text-align: center; }
+    .toast.show { opacity: 1; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>🌿 サービス稼働状況 管理画面</h1>
+  <span class="who" id="who" hidden></span>
+  <button class="hbtn" id="logout-btn" hidden>ログアウト</button>
+</header>
+
+<div class="app">
+  <!-- ログイン -->
+  <section id="v-login" hidden>
+    <div class="box">
+      <div class="box-title">担当職員ログイン</div>
+      <div id="login-real">
+        <label class="lb" for="email">メールアドレス</label>
+        <input type="email" id="email" autocomplete="username" />
+        <label class="lb" for="pw">パスワード</label>
+        <input type="password" id="pw" autocomplete="current-password" />
+        <div class="err" id="login-err" hidden></div>
+        <button class="btn full" id="login-btn">ログイン</button>
+        <p style="margin-top:12px;text-align:center;"><button class="link" id="reset-btn">パスワードを忘れた場合・初回設定</button></p>
+      </div>
+      <div id="login-demo" hidden>
+        <p class="hint" style="margin-bottom:12px;">デモ用の担当者を選んでください（本番では各職員のメールアドレスとパスワードでログインします）。</p>
+        <div id="demo-users"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- メイン -->
+  <section id="v-main" hidden>
+    <div class="tabs">
+      <button class="tab on" data-tab="svc">稼働状況の更新</button>
+      <button class="tab" data-tab="hist">更新履歴</button>
+    </div>
+    <div id="t-svc"></div>
+    <div id="t-hist" hidden>
+      <p class="hint" style="margin-bottom:10px;">直近100件の操作記録です。記録は変更・削除できません。</p>
+      <div id="hist"></div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  const C = window.FS_CONFIG, FS = window.FS;
+  const $ = id => document.getElementById(id);
+  const show = (id, on) => { $(id).hidden = !on; };
+  const STATUS_LABEL = { open: "稼働中", notice: "稼働中（予告表示中）", closed: "停止中" };
+
+  // ════════ データ層（デモ / Firebase） ════════
+  const DEMO_USERS = [
+    { uid: "demo-seikatsu", name: "生活環境課 担当者（デモ）", dept: "生活環境課", role: "editor", services: { gomi: true, kusaki: true } },
+    { uid: "demo-jumin",    name: "コンビニ交付 担当者（デモ）", dept: "住民課",     role: "editor", services: { conveni: true } },
+    { uid: "demo-admin",    name: "デジタル社会推進課（デモ管理者）", dept: "デジタル社会推進課", role: "admin", services: {} }
+  ];
+  let store;
+  if (C.demo) {
+    store = {
+      _db() { try { return JSON.parse(localStorage.getItem("fs_demo_db")) || {}; } catch (e) { return {}; } },
+      _cbs: [],
+      async init(onUser) {
+        show("login-real", false); show("login-demo", true);
+        $("demo-users").innerHTML = DEMO_USERS.map(u => `<button class="btn sub full" style="margin-bottom:8px;" data-uid="${u.uid}">${FS.esc(u.name)}</button>`).join("");
+        $("demo-users").onclick = e => {
+          const u = DEMO_USERS.find(x => x.uid === e.target.dataset.uid); if (!u) return;
+          try { sessionStorage.setItem("fs_demo_uid", u.uid); } catch (e) {}
+          onUser(u);
+        };
+        let uid = null; try { uid = sessionStorage.getItem("fs_demo_uid"); } catch (e) {}
+        onUser(DEMO_USERS.find(u => u.uid === uid) || null);
+      },
+      async logout() { try { sessionStorage.removeItem("fs_demo_uid"); } catch (e) {} location.reload(); },
+      subscribe(cb) { this._cbs.push(cb); cb(this._db()); },
+      newKey() { return "k" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); },
+      async commit(paths) {
+        const db = this._db();
+        for (const [p, v] of Object.entries(paths)) {
+          const parts = p.split("/"); let o = db;
+          for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]] = o[parts[i]] || {};
+          if (v === null) delete o[parts.at(-1)]; else o[parts.at(-1)] = v;
+        }
+        try { localStorage.setItem("fs_demo_db", JSON.stringify(db)); } catch (e) {}
+        this._cbs.forEach(cb => cb(db));
+      }
+    };
+  } else {
+    const fa = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js");
+    const fu = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js");
+    const fd = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+    const app = fa.initializeApp(C.firebaseConfig), auth = fu.getAuth(app), db = fd.getDatabase(app);
+    store = {
+      async init(onUser) {
+        fu.onAuthStateChanged(auth, async u => {
+          if (!u) { onUser(null); return; }
+          try {
+            const snap = await fd.get(fd.ref(db, "staff/" + u.uid));
+            if (!snap.exists()) throw new Error("not-registered");
+            onUser({ uid: u.uid, email: u.email, services: {}, ...snap.val() });
+          } catch (e) {
+            await fu.signOut(auth);
+            loginError("このアカウントは担当職員として登録されていません。デジタル社会推進課へご連絡ください。");
+          }
+        });
+      },
+      async logout() { await fu.signOut(auth); },
+      subscribe(cb) {
+        const state = {};
+        const emit = () => cb(state);
+        fd.onValue(fd.ref(db, "services"), s => { state.services = s.val() || {}; emit(); });
+        fd.onValue(fd.ref(db, "schedules_list"), s => { state.schedules_list = s.val() || {}; emit(); });
+        fd.onValue(fd.query(fd.ref(db, "history"), fd.orderByChild("at"), fd.limitToLast(100)), s => {
+          const h = {}; s.forEach(c => { h[c.key] = c.val(); }); state.history = h; emit();
+        });
+      },
+      newKey() { return fd.push(fd.ref(db, "history")).key; },
+      // 稼働状況と履歴を同時に書き込む（片方だけ失敗することはない）
+      async commit(paths) { await fd.update(fd.ref(db), paths); }
+    };
+    $("login-btn").onclick = async () => {
+      show("login-err", false);
+      const btn = $("login-btn"); btn.disabled = true; btn.textContent = "確認中…";
+      try { await fu.signInWithEmailAndPassword(auth, $("email").value.trim(), $("pw").value); }
+      catch (e) { loginError("メールアドレスまたはパスワードが正しくありません。"); }
+      finally { btn.disabled = false; btn.textContent = "ログイン"; }
+    };
+    $("pw").addEventListener("keydown", e => { if (e.key === "Enter") $("login-btn").click(); });
+    $("reset-btn").onclick = async () => {
+      const email = $("email").value.trim();
+      if (!email) { loginError("メールアドレスを入力してから押してください。"); return; }
+      try { await fu.sendPasswordResetEmail(auth, email); toast("パスワード設定用のメールを送信しました"); }
+      catch (e) { loginError("送信できませんでした。メールアドレスをご確認ください。"); }
+    };
+  }
+  function loginError(msg) { $("login-err").textContent = msg; show("login-err", true); }
+
+  // ════════ 画面 ════════
+  let me = null, data = {}, rendered = false;
+  const sel = {};      // 選択中の手動ステータス
+  const rmode = {};    // 再開予定の指定方法
+  const mySvcs = () => C.services.filter(s => me.role === "admin" || (me.services || {})[s.id]);
+
+  store.init(u => {
+    me = u;
+    show("v-login", !u); show("v-main", !!u); show("who", !!u); show("logout-btn", !!u);
+    if (!u) return;
+    $("who").textContent = `${u.name}（${u.dept}）`;
+    if (!mySvcs().length) { $("t-svc").innerHTML = '<div class="empty">担当するサービスが設定されていません。デジタル社会推進課へご連絡ください。</div>'; return; }
+    store.subscribe(d => { data = d; if (!rendered) { buildForms(); rendered = true; } refresh(); });
+  });
+  $("logout-btn").onclick = () => store.logout();
+  document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
+    show("t-svc", t.dataset.tab === "svc"); show("t-hist", t.dataset.tab === "hist");
+  });
+  setInterval(() => rendered && refresh(), 30 * 1000);
+
+  // ── フォームの組み立て（サービスごと） ──
+  function buildForms() {
+    $("t-svc").innerHTML = mySvcs().map(s => `
+      <div class="svc" id="svc-${s.id}">
+        <div class="svc-head"><span class="svc-icon">${s.icon}</span><span class="svc-name">${FS.esc(s.label)}</span><span class="cur" id="cur-${s.id}"></span></div>
+        <div class="svc-note" id="note-${s.id}" hidden></div>
+        <div class="svc-meta" id="meta-${s.id}"></div>
+
+        <div class="sec">
+          <div class="sec-title">今すぐ切り替える（手動）</div>
+          <div class="radio-group">
+            <button class="radio-btn" data-svc="${s.id}" data-st="open">🌿 稼働中</button>
+            ${s.notice ? `<button class="radio-btn" data-svc="${s.id}" data-st="notice">📢 予告</button>` : ""}
+            <button class="radio-btn" data-svc="${s.id}" data-st="closed">🚫 停止中</button>
+          </div>
+          <div id="nf-${s.id}" hidden>
+            <label class="lb">予告期間<span class="opt">任意</span></label>
+            <input type="text" id="np-${s.id}" placeholder="例：4月25日（金）終日" />
+            <label class="lb">予告メッセージ<span class="opt">任意</span></label>
+            <textarea id="nm-${s.id}" placeholder="例：雨天予報のため翌日停止の可能性があります"></textarea>
+          </div>
+          <div id="cf-${s.id}" hidden>
+            <label class="lb">停止期間<span class="opt">任意</span></label>
+            <input type="text" id="pd-${s.id}" placeholder="例：4月20日（日）終日" />
+            <label class="lb">停止理由<span class="opt">任意</span></label>
+            <textarea id="rs-${s.id}" placeholder="例：雨天のため搬入不可"></textarea>
+            <label class="lb">再開予定</label>
+            <div class="reopen-group">
+              ${[["none", "設定しない"], ["datetime", "日時を指定"], ["dateonly", "日付のみ"], ["undecided", "未定"]].map(([m, l]) =>
+                `<button class="reopen-btn" data-svc="${s.id}" data-rm="${m}">${l}</button>`).join("")}
+            </div>
+            <div id="rdtw-${s.id}" hidden><input type="datetime-local" id="rdt-${s.id}" step="300" />
+              <div class="auto-note">⏱ この日時を過ぎると、閲覧ページは自動で「稼働中」の表示に戻ります</div></div>
+            <div id="rdw-${s.id}" hidden><input type="date" id="rd-${s.id}" /></div>
+          </div>
+          <button class="btn full" id="up-${s.id}">${FS.esc(s.label)}の状態を更新する</button>
+        </div>
+
+        ${s.schedule ? `
+        <div class="sec">
+          <div class="sec-title">📅 予定の登録（自動で切り替え）</div>
+          <div id="sl-${s.id}"></div>
+          <button class="btn sub full" id="st-${s.id}">＋ 予定を登録する</button>
+          <div class="sch-form" id="sf-${s.id}" hidden>
+            <label class="lb">予告を出し始める日時<span class="opt">任意</span></label>
+            <input type="datetime-local" id="sna-${s.id}" step="300" />
+            <label class="lb">予告メッセージ<span class="opt">任意</span></label>
+            <textarea id="snm-${s.id}" placeholder="例：明日は雨天予報のため停止する可能性があります"></textarea>
+            <label class="lb">停止を始める日時<span class="req">必須</span></label>
+            <input type="datetime-local" id="sca-${s.id}" step="300" />
+            <label class="lb">停止理由<span class="opt">任意</span></label>
+            <textarea id="srs-${s.id}" placeholder="例：システムメンテナンスのため"></textarea>
+            <label class="lb">再開する日時<span class="req">必須</span></label>
+            <input type="datetime-local" id="sra-${s.id}" step="300" />
+            <p class="hint" style="margin:-4px 0 12px;">登録しておくと、閲覧ページは日時に合わせて「予告 → 停止中 → 稼働中」と自動で表示が変わります。</p>
+            <button class="btn navy full" id="sr-${s.id}">この予定を登録する</button>
+          </div>
+        </div>` : ""}
+      </div>`).join("");
+
+    mySvcs().forEach(s => {
+      document.querySelectorAll(`.radio-btn[data-svc=${s.id}]`).forEach(b => b.onclick = () => setSel(s.id, b.dataset.st));
+      document.querySelectorAll(`.reopen-btn[data-svc=${s.id}]`).forEach(b => b.onclick = () => setRmode(s.id, b.dataset.rm));
+      $("up-" + s.id).onclick = () => saveManual(s);
+      if (s.schedule) {
+        $("st-" + s.id).onclick = () => { const f = $("sf-" + s.id); f.hidden = !f.hidden; $("st-" + s.id).textContent = f.hidden ? "＋ 予定を登録する" : "▲ 閉じる"; };
+        $("sr-" + s.id).onclick = () => addSchedule(s);
+      }
+      loadManual(s.id);
+    });
+  }
+
+  function setSel(id, st) {
+    sel[id] = st;
+    document.querySelectorAll(`.radio-btn[data-svc=${id}]`).forEach(b => b.className = "radio-btn" + (b.dataset.st === st ? " sel-" + st : ""));
+    show("cf-" + id, st === "closed");
+    if ($("nf-" + id)) show("nf-" + id, st === "notice");
+  }
+  function setRmode(id, m) {
+    rmode[id] = m;
+    document.querySelectorAll(`.reopen-btn[data-svc=${id}]`).forEach(b => b.classList.toggle("on", b.dataset.rm === m));
+    show("rdtw-" + id, m === "datetime"); show("rdw-" + id, m === "dateonly");
+  }
+  function toLocal(iso) {
+    const dt = new Date(iso), p = n => String(n).padStart(2, "0");
+    return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`;
+  }
+  // 手動設定の現在値をフォームに入れる
+  function loadManual(id) {
+    const m = (data.services || {})[id] || { status: "open" };
+    setSel(id, m.status || "open");
+    $("pd-" + id).value = m.period || ""; $("rs-" + id).value = m.reason || "";
+    if ($("np-" + id)) { $("np-" + id).value = m.notice_period || ""; $("nm-" + id).value = m.notice_msg || ""; }
+    const mode = m.reopen_mode || "none"; setRmode(id, mode);
+    $("rdt-" + id).value = mode === "datetime" && m.reopen ? toLocal(m.reopen) : "";
+    $("rd-" + id).value = mode === "dateonly" && m.reopen ? m.reopen.slice(0, 10) : "";
+  }
+
+  // ── 表示の更新（現在の状態・予定一覧・履歴） ──
+  function refresh() {
+    const now = Date.now();
+    mySvcs().forEach(s => {
+      const m = (data.services || {})[s.id], sc = (data.schedules_list || {})[s.id];
+      const eff = FS.effective(m, sc, now);
+      const cur = $("cur-" + s.id);
+      cur.textContent = "現在：" + STATUS_LABEL[eff.status];
+      cur.className = "cur cur-" + eff.status;
+      const note = $("note-" + s.id);
+      if (eff.source === "schedule") {
+        note.innerHTML = eff.status === "closed"
+          ? `📅 登録済みの予定により、閲覧ページは「停止中」と表示されています（${FS.fmtDt(eff.reopen)} に自動で再開）。早めに再開する場合は、下の予定を取り消してください。`
+          : "📅 登録済みの予定により、閲覧ページに停止予告が表示されています。";
+        note.hidden = false;
+      } else if (eff.source === "manual-expired") {
+        note.textContent = "⏱ 再開予定日時を過ぎたため、閲覧ページは自動で「稼働中」と表示されています。";
+        note.hidden = false;
+      } else note.hidden = true;
+      $("meta-" + s.id).textContent = m && m.updatedAt ? `手動設定の最終更新：${FS.fmtDt(m.updatedAt)}　${m.updatedBy || ""}` : "";
+      if (s.schedule) renderSchedules(s, sc, now);
+    });
+    renderHist();
+  }
+
+  function renderSchedules(s, sc, now) {
+    const list = FS.upcoming(sc, now);
+    $("sl-" + s.id).innerHTML = list.length ? list.map(x => {
+      const active = now >= Date.parse(x.closedAt), noticing = !active && x.noticeAt && now >= Date.parse(x.noticeAt);
+      const tag = active ? '<span class="sch-tag t-active">停止中</span>' : noticing ? '<span class="sch-tag t-notice">予告中</span>' : '<span class="sch-tag t-wait">予定</span>';
+      return `<div class="sch ${active ? "active" : noticing ? "noticing" : ""}">
+        ${tag}${x.noticeAt ? `📢 予告 ${FS.fmtDt(x.noticeAt)}<br>` : ""}
+        🚫 停止 ${FS.fmtDt(x.closedAt)}<br>🌿 再開 ${FS.fmtDt(x.reopenAt)}
+        ${x.reason ? `<div class="sch-memo">理由：${FS.esc(x.reason)}</div>` : ""}
+        ${x.noticeMsg ? `<div class="sch-memo">予告文：${FS.esc(x.noticeMsg)}</div>` : ""}
+        <div class="sch-memo">登録：${FS.esc(x.createdBy || "")}</div>
+        <button class="btn sm danger" style="margin-top:6px;" onclick="cancelSchedule('${s.id}','${x.key}')">${active ? "予定を取り消して再開する" : "この予定を取り消す"}</button>
+      </div>`;
+    }).join("") : '<p class="hint" style="margin-bottom:10px;">登録中の予定はありません。</p>';
+  }
+
+  function renderHist() {
+    const arr = Object.values(data.history || {}).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 100);
+    $("hist").innerHTML = arr.length ? arr.map(h => `<div class="hist">
+      <div>${FS.esc(FS.fmtDt(h.at))}　${FS.esc(h.name)}（${FS.esc(h.dept)}）</div>
+      <div><b>${FS.esc(h.serviceLabel || h.service)}</b>：${FS.esc(h.summary)}</div>
+    </div>`).join("") : '<div class="empty">まだ記録はありません。</div>';
+  }
+
+  // ── 保存処理 ──
+  function histEntry(s, action, summary) {
+    return { at: new Date().toISOString(), uid: me.uid, name: me.name, dept: me.dept, service: s.id, serviceLabel: s.label, action, summary };
+  }
+  async function commit(paths, okMsg) {
+    try { await store.commit(paths); toast(okMsg); return true; }
+    catch (e) { console.warn(e); toast("保存できませんでした。権限がないか、通信に問題があります。"); return false; }
+  }
+
+  async function saveManual(s) {
+    const id = s.id, st = sel[id] || "open", mode = rmode[id] || "none";
+    let reopen = "", reopen_mode = "none";
+    if (st === "closed") {
+      if (mode === "datetime") { const v = $("rdt-" + id).value; if (v) { reopen = new Date(v).toISOString(); reopen_mode = "datetime"; } }
+      else if (mode === "dateonly") { const v = $("rd-" + id).value; if (v) { reopen = v; reopen_mode = "dateonly"; } }
+      else if (mode === "undecided") reopen_mode = "undecided";
+      if (reopen_mode === "datetime" && Date.parse(reopen) <= Date.now()) { toast("再開予定日時は、現在より後の日時にしてください"); return; }
+    }
+    const rec = {
+      status: st,
+      period: st === "closed" ? $("pd-" + id).value.trim() : "",
+      reason: st === "closed" ? $("rs-" + id).value.trim() : "",
+      reopen, reopen_mode,
+      notice_period: st === "notice" && $("np-" + id) ? $("np-" + id).value.trim() : "",
+      notice_msg: st === "notice" && $("nm-" + id) ? $("nm-" + id).value.trim() : "",
+      updatedAt: new Date().toISOString(), updatedBy: me.name, updatedByUid: me.uid
+    };
+    let summary = "手動で「" + STATUS_LABEL[st] + "」に変更";
+    if (rec.reason) summary += "（理由：" + rec.reason + "）";
+    if (reopen_mode !== "none") summary += "／再開予定：" + (FS.fmtReopen(rec) || "未定");
+    const btn = $("up-" + id); btn.disabled = true;
+    await commit({ ["services/" + id]: rec, ["history/" + store.newKey()]: histEntry(s, "status", summary) }, `${s.label}の状態を更新しました ✓`);
+    btn.disabled = false;
+  }
+
+  async function addSchedule(s) {
+    const id = s.id, na = $("sna-" + id).value, ca = $("sca-" + id).value, ra = $("sra-" + id).value;
+    if (!ca || !ra) return toast("停止を始める日時と再開する日時は必須です");
+    if (na && Date.parse(na) >= Date.parse(ca)) return toast("予告の開始は、停止より前の日時にしてください");
+    if (Date.parse(ca) >= Date.parse(ra)) return toast("再開する日時は、停止より後の日時にしてください");
+    if (Date.parse(ra) <= Date.now()) return toast("再開する日時が過ぎています");
+    const overlap = FS.upcoming((data.schedules_list || {})[id]).some(x => Date.parse(ca) < Date.parse(x.reopenAt) && Date.parse(ra) > Date.parse(x.closedAt));
+    if (overlap && !confirm("登録済みの予定と期間が重なっています。このまま登録しますか？")) return;
+    const rec = {
+      noticeAt: na ? new Date(na).toISOString() : "", noticeMsg: $("snm-" + id).value.trim(),
+      closedAt: new Date(ca).toISOString(), reopenAt: new Date(ra).toISOString(), reason: $("srs-" + id).value.trim(),
+      createdAt: new Date().toISOString(), createdBy: me.name, createdByUid: me.uid
+    };
+    const summary = `予定を登録（停止 ${FS.fmtDt(rec.closedAt)} 〜 再開 ${FS.fmtDt(rec.reopenAt)}）`;
+    const ok = await commit({ [`schedules_list/${id}/${store.newKey()}`]: rec, ["history/" + store.newKey()]: histEntry(s, "schedule_add", summary) }, "予定を登録しました ✓");
+    if (ok) { ["sna", "snm", "sca", "srs", "sra"].forEach(k => $(k + "-" + id).value = ""); $("st-" + id).click(); }
+  }
+
+  window.cancelSchedule = async (id, key) => {
+    const s = C.services.find(x => x.id === id), x = ((data.schedules_list || {})[id] || {})[key];
+    if (!x || !confirm("この予定を取り消しますか？\n閲覧ページの表示は、手動で設定した状態に戻ります。")) return;
+    const summary = `予定を取り消し（停止 ${FS.fmtDt(x.closedAt)} 〜 再開 ${FS.fmtDt(x.reopenAt)}）`;
+    await commit({ [`schedules_list/${id}/${key}`]: null, ["history/" + store.newKey()]: histEntry(s, "schedule_cancel", summary) }, "予定を取り消しました");
+  };
+
+  function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 3200); }
+</script>
+</body>
+</html>
