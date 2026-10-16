@@ -291,6 +291,7 @@
        ごみ収集カード（フルワイド）
     ══════════════════════════════════════ */
     .gomi-card {
+      grid-column: 1 / -1;
       background: var(--surface);
       border: 1px solid var(--border);
       border-left: 4px solid var(--border);
@@ -408,40 +409,41 @@
     }
 
     /* ══════════════════════════════════════
-       ボトムシート（詳細ポップアップ）
+       サイドシート（右からスライド）
     ══════════════════════════════════════ */
     .sheet-overlay {
       position: fixed; inset: 0; z-index: 100;
-      background: rgba(0,0,0,0.45);
+      background: rgba(0,0,0,0.40);
       opacity: 0; pointer-events: none;
       transition: opacity 0.25s;
     }
     .sheet-overlay.open { opacity: 1; pointer-events: auto; }
 
     .sheet {
-      position: fixed; left: 0; right: 0; bottom: 0; z-index: 101;
+      position: fixed; top: 0; right: 0; bottom: 0; z-index: 101;
+      width: min(92vw, 420px);
       background: var(--surface);
-      border-radius: 20px 20px 0 0;
+      border-radius: 16px 0 0 16px;
+      padding-top: env(safe-area-inset-top, 0px);
       padding-bottom: max(20px, env(safe-area-inset-bottom, 20px));
-      max-height: 85vh;
+      padding-right: env(safe-area-inset-right, 0px);
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
-      transform: translateY(100%);
+      transform: translateX(100%);
       transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
-      box-shadow: 0 -4px 32px rgba(0,0,0,0.18);
+      box-shadow: -4px 0 32px rgba(0,0,0,0.18);
     }
-    .sheet.open { transform: translateY(0); }
+    .sheet.open { transform: translateX(0); }
 
-    .sheet-handle {
-      width: 36px; height: 4px;
-      background: var(--border);
-      border-radius: 2px;
-      margin: 12px auto 4px;
-    }
+    .sheet-handle { display: none; }
+
     .sheet-head {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 16px 10px;
+      padding: 14px 16px;
       border-bottom: 1px solid var(--border);
+      position: sticky; top: 0;
+      background: var(--surface);
+      z-index: 1;
     }
     .sheet-title { font-size: 15px; font-weight: 700; color: var(--fg); }
     .sheet-close {
@@ -453,6 +455,7 @@
       color: var(--fg-sub); font-size: 13px; font-weight: 600;
       -webkit-tap-highlight-color: transparent;
       padding: 0 14px;
+      flex-shrink: 0;
     }
     .sheet-body {
       padding: 14px 16px;
@@ -508,7 +511,7 @@
 
 <div class="grid" id="grid">
 
-  <!-- ── ごみ収集カード ── -->
+  <!-- ── ごみ収集カード（2列フルワイド・アコーディオン） ── -->
   <div class="gomi-card open" id="gomi-card">
     <div class="gomi-header" onclick="toggleGomi()">
       <span class="card-icon">
@@ -850,7 +853,7 @@ if (C.demo) {
 setInterval(renderAll, 30000);
 </script>
 
-<!-- ── ボトムシート ── -->
+<!-- ── サイドシート（右からスライド） ── -->
 <div class="sheet-overlay" id="sheet-overlay" onclick="closeSheet()"></div>
 <div class="sheet" id="sheet-panel">
   <div class="sheet-handle"></div>
