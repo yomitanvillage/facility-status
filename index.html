@@ -291,7 +291,6 @@
        ごみ収集カード（フルワイド）
     ══════════════════════════════════════ */
     .gomi-card {
-      grid-column: 1 / -1;          /* 2列分使う */
       background: var(--surface);
       border: 1px solid var(--border);
       border-left: 4px solid var(--border);
@@ -446,43 +445,45 @@
     }
     .sheet-title { font-size: 15px; font-weight: 700; color: var(--fg); }
     .sheet-close {
-      width: 28px; height: 28px;
-      background: var(--bg); border: none;
-      border-radius: 50%; cursor: pointer;
+      min-width: 80px; height: 36px;
+      background: var(--bg); border: 1.5px solid var(--border);
+      border-radius: 18px; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
-      color: var(--fg-sub); font-size: 16px;
+      gap: 5px;
+      color: var(--fg-sub); font-size: 13px; font-weight: 600;
       -webkit-tap-highlight-color: transparent;
+      padding: 0 14px;
     }
     .sheet-body {
       padding: 14px 16px;
-      font-size: 13px;
+      font-size: 15px;
       line-height: 1.8;
       color: var(--fg-sub);
     }
     .sheet-body h3 {
-      font-size: 13px; font-weight: 700; color: var(--accent);
-      margin: 14px 0 6px; padding-left: 8px;
+      font-size: 14px; font-weight: 700; color: var(--accent);
+      margin: 16px 0 8px; padding-left: 8px;
       border-left: 3px solid var(--open-dot);
     }
     .sheet-body h3:first-child { margin-top: 0; }
-    .sheet-body p  { margin-bottom: 6px; color: var(--fg); }
-    .sheet-body ul { margin: 4px 0 8px 16px; }
-    .sheet-body li { margin-bottom: 3px; color: var(--fg); }
-    .sheet-body table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 8px 0; }
-    .sheet-body th { background: var(--open-bg); color: var(--open-fg); padding: 5px 8px; text-align: left; border: 1px solid var(--border); }
-    .sheet-body td { padding: 5px 8px; border: 1px solid var(--border); color: var(--fg); }
+    .sheet-body p  { margin-bottom: 8px; color: var(--fg); }
+    .sheet-body ul { margin: 4px 0 8px 18px; }
+    .sheet-body li { margin-bottom: 4px; color: var(--fg); }
+    .sheet-body table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0; }
+    .sheet-body th { background: var(--open-bg); color: var(--open-fg); padding: 7px 10px; text-align: left; border: 1px solid var(--border); }
+    .sheet-body td { padding: 7px 10px; border: 1px solid var(--border); color: var(--fg); }
     .sheet-body tr:nth-child(even) td { background: var(--bg); }
     .sheet-body .note {
-      font-size: 12px; color: var(--fg-sub);
+      font-size: 13px; color: var(--fg-sub);
       background: var(--bg); border-radius: 6px;
-      padding: 8px 10px; margin-top: 8px; line-height: 1.7;
+      padding: 10px 12px; margin-top: 8px; line-height: 1.7;
     }
     .sheet-status-bar {
-      margin: 0 0 12px;
-      padding: 8px 12px;
+      margin: 0 0 14px;
+      padding: 10px 14px;
       border-radius: 8px;
-      font-size: 12px;
-      line-height: 1.6;
+      font-size: 14px;
+      line-height: 1.7;
     }
     .sheet-status-bar.closed { background: var(--closed-bg); color: var(--closed-fg); }
     .sheet-status-bar.notice { background: var(--notice-bg); color: var(--notice-fg); }
@@ -507,7 +508,7 @@
 
 <div class="grid" id="grid">
 
-  <!-- ── ごみ収集カード（2列フルワイド） ── -->
+  <!-- ── ごみ収集カード ── -->
   <div class="gomi-card open" id="gomi-card">
     <div class="gomi-header" onclick="toggleGomi()">
       <span class="card-icon">
@@ -855,7 +856,7 @@ setInterval(renderAll, 30000);
   <div class="sheet-handle"></div>
   <div class="sheet-head">
     <span class="sheet-title" id="sheet-title"></span>
-    <button class="sheet-close" onclick="closeSheet()">✕</button>
+    <button class="sheet-close" onclick="closeSheet()">✕ 閉じる</button>
   </div>
   <div class="sheet-body" id="sheet-body"></div>
 </div>
