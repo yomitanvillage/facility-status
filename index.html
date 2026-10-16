@@ -794,10 +794,69 @@ window.openSheet = (id) => {
   document.body.style.overflow = "hidden";
 };
 window.closeSheet = () => {
+  const panel = document.getElementById("sheet-panel");
+  panel.style.transition = "";
+  panel.style.transform  = "";
   document.getElementById("sheet-overlay").classList.remove("open");
-  document.getElementById("sheet-panel").classList.remove("open");
+  panel.classList.remove("open");
   document.body.style.overflow = "";
 };
+
+/* ── サイドシート スワイプ操作（右方向でシートを閉じる） ── */
+(function() {
+  const panel   = document.getElementById("sheet-panel");
+  const overlay = document.getElementById("sheet-overlay");
+  let startX = 0, startY = 0, curX = 0, dragging = false, locked = false;
+  const THRESHOLD = 80;   // この距離以上右スワイプで閉じる
+  const VELOCITY  = 0.4;  // 素早いスワイプ判定（px/ms）
+
+  panel.addEventListener("touchstart", e => {
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY; curX = 0;
+    dragging = false; locked = false;
+  }, { passive: true });
+
+  panel.addEventListener("touchmove", e => {
+    if (locked) return;
+    const t  = e.touches[0];
+    const dx = t.clientX - startX;
+    const dy = t.clientY - startY;
+
+    // 縦スクロールが主体なら追従しない
+    if (!dragging && Math.abs(dy) > Math.abs(dx) + 5) { locked = true; return; }
+    if (!dragging && Math.abs(dx) < 8) return;
+
+    dragging = true;
+    curX = Math.max(0, dx);   // 右方向のみ追従
+
+    // アニメーションを止めて指に追従させる
+    panel.style.transition = "none";
+    panel.style.transform  = `translateX(${curX}px)`;
+
+    // オーバーレイも薄くしていく
+    const ratio = 1 - curX / panel.offsetWidth;
+    overlay.style.opacity = Math.max(0, ratio * 0.4);
+  }, { passive: true });
+
+  panel.addEventListener("touchend", e => {
+    if (!dragging) return;
+    const elapsed = e.timeStamp - (e.changedTouches[0]?.identifier ?? 0);
+    const velocity = curX / Math.max(1, e.timeStamp - startX);
+    const shouldClose = curX > THRESHOLD;
+
+    panel.style.transition = "";
+    overlay.style.opacity  = "";
+
+    if (shouldClose) {
+      window.closeSheet();
+    } else {
+      // 戻す
+      panel.style.transform = "";
+      overlay.style.opacity = "";
+    }
+    dragging = false;
+  }, { passive: true });
+})();
 
 function renderAll() {
   const now = Date.now();
