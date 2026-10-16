@@ -287,51 +287,10 @@
       margin-top: auto;   /* card-topが伸びた分、下に押しつける */
     }
 
-    /* ══════════════════════════════════════
-       ごみ収集カード（フルワイド）
-    ══════════════════════════════════════ */
-    .gomi-card {
-      grid-column: 1 / -1;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-left: 4px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-    }
-    .gomi-card.open   { border-left-color: var(--open-dot); }
-    .gomi-card.closed { border-left-color: var(--closed-dot); }
-
-    .gomi-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 14px 14px 12px;
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .gomi-header .card-icon { flex-shrink: 0; }
-    .gomi-title-wrap { flex: 1; min-width: 0; }
-    .gomi-title { font-size: 15px; font-weight: 700; }
-    .gomi-today-date { font-size: 11px; color: var(--fg-sub); margin-top: 3px; }
-    .gomi-today-row {
-      display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; align-items: center;
-    }
+    /* ごみカード：今日の品目タグ行（カード内） */
+    .gomi-today-date { font-size: 11px; color: var(--fg-sub); margin-top: 2px; }
+    .gomi-today-row  { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; align-items: center; }
     .gomi-today-none { font-size: 11px; color: var(--fg-sub); }
-    .gomi-status-area { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
-    .gomi-expand-hint {
-      font-size: 11px; font-weight: 600; color: var(--accent);
-      padding: 4px 14px 10px; text-align: right;
-    }
-
-    .gomi-status-detail {
-      padding: 8px 14px 10px;
-      background: var(--closed-bg);
-      font-size: 12px;
-      line-height: 1.6;
-    }
-    .gomi-status-detail dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; }
-    .gomi-status-detail dt { font-weight: 600; color: var(--fg-sub); white-space: nowrap; }
-    .gomi-status-detail dd { color: var(--fg); white-space: pre-wrap; min-width: 0; }
 
     .gomi-body { padding: 0 14px 14px; border-top: 1px solid var(--border); }
     .gomi-area-label { font-size: 12px; color: var(--fg-sub); margin: 10px 0 5px; display: block; }
@@ -511,57 +470,24 @@
 
 <div class="grid" id="grid">
 
-  <!-- ── ごみ収集カード（2列フルワイド・アコーディオン） ── -->
-  <div class="gomi-card open" id="gomi-card">
-    <div class="gomi-header" onclick="toggleGomi()">
-      <span class="card-icon">
-        <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-      </span>
-      <div class="gomi-title-wrap">
-        <div class="gomi-title">ごみ収集日</div>
+  <!-- ── ごみ収集日カード ── -->
+  <div class="card open" id="card-gomi" onclick="openSheet('gomi')">
+    <div class="card-top">
+      <div class="card-icon-row">
+        <span class="card-icon">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        </span>
+        <div class="badge-col" id="badges-gomi">
+          <span class="badge badge-open"><span class="bdot"></span>稼働中</span>
+        </div>
+      </div>
+      <div>
+        <div class="card-name">ごみ収集日</div>
         <div class="gomi-today-date" id="gomi-today-date"></div>
         <div class="gomi-today-row" id="gomi-today-row"></div>
       </div>
-      <div class="gomi-status-area">
-        <span class="badge badge-open" id="gomi-status-badge">稼働中</span>
-      </div>
     </div>
-    <div class="gomi-status-detail" id="gomi-status-detail" style="display:none;"></div>
-    <div class="gomi-expand-hint" id="gomi-expand-hint">▼ 直近3日と詳細を見る</div>
-    <div class="gomi-body" id="gomi-body" style="display:none;">
-      <span class="gomi-area-label">お住まいのエリアを選択</span>
-      <select class="gomi-select" id="area-sel" onchange="saveArea();renderGomi()">
-        <option value="1">① 高志保(1)・長浜(1)</option>
-        <option value="2">② 波平(1)・上地・高志保(2)・座喜味(3)</option>
-        <option value="3">③ 長浜(2)・瀬名波・渡慶次・儀間・宇座</option>
-        <option value="4a">④-1 座喜味(1)（県営波平団地含）</option>
-        <option value="4b">④-2 楚辺・波平(2)・座喜味(2)・都屋</option>
-        <option value="5">⑤ 渡具知・古堅・大湾・比謝・比謝矼・伊良皆(1)・大木(1)</option>
-        <option value="6">⑥ 喜名・横田・親志・座喜味(トーガー地域/シーレイク)・伊良皆(2)・大木(2)</option>
-      </select>
-      <div id="gomi-cards"></div>
-      <div class="gomi-notes">
-        <div class="gomi-note-row">
-          <span class="gomi-note-icon">📄</span>
-          <a href="https://cccc.backshelf.jp/bookview/?filseq=12401&page=1" target="_blank">ごみの分け方・出し方（PDF）</a>
-        </div>
-        <div class="gomi-note-row">
-          <span class="gomi-note-icon">🕗</span>
-          <span>収集日の<strong>朝8時30分まで</strong>に門前へ出してください</span>
-        </div>
-        <div class="gomi-note-row">
-          <button class="gomi-typhoon-toggle" onclick="toggleTyphoon()">
-            <span>🌀</span>
-            <span id="typhoon-toggle-label">台風時のごみ出しについて ▼</span>
-          </button>
-        </div>
-        <div id="typhoon-body" class="gomi-typhoon-body" style="display:none;">
-          <p>「暴風警報」発令中、または業務中に「暴風警報」が発令される見込みで危険性がある場合は、ごみの収集を停止します。</p>
-          <p>朝8時30分までに「暴風警報」が解除されていない場合は、次回のごみ出しの日にお願いします。</p>
-          <p>※ 暴風警報が発令されていない場合でも、ごみが飛散しないよう各自で対策をお願いします。</p>
-        </div>
-      </div>
-    </div>
+    <div class="card-tap-hint">タップで収集日程を見る ›</div>
   </div>
 
   <!-- ── 草木資源化施設カード ── -->
@@ -667,37 +593,14 @@ function renderTodaySummary(key) {
   }
 }
 
-function renderGomi() {
-  const key = document.getElementById("area-sel").value;
-  renderTodaySummary(key);
-  const days = getNext3(key);
-  const container = document.getElementById("gomi-cards");
-  container.innerHTML = "";
-  days.forEach(({ date, items, isToday, isTomorrow }) => {
-    const label = `${MON_JA[date.getMonth()]}${date.getDate()}日（${DOW_JA[date.getDay()]}）`;
-    const badge = isToday    ? '<span class="gomi-today">今日</span>'
-                : isTomorrow ? '<span class="gomi-tomorrow">明日</span>' : '';
-    const tags = items.map(i => `<span class="gomi-tag ${i.c}">${i.l}</span>`).join("");
-    const div = document.createElement("div");
-    div.className = "gomi-day-card";
-    div.innerHTML = `<span class="gomi-day-label">${label}</span>${badge}<div class="gomi-tags">${tags}</div>`;
-    container.appendChild(div);
-  });
+function getAreaKey() {
+  try { return localStorage.getItem(GOMI_KEY) || "1"; } catch(e) { return "1"; }
 }
-function saveArea() {
-  try { localStorage.setItem(GOMI_KEY, document.getElementById("area-sel").value); } catch(e) {}
+function renderGomi() {
+  renderTodaySummary(getAreaKey());
 }
 function initGomi() {
-  try { const s = localStorage.getItem(GOMI_KEY); if (s) document.getElementById("area-sel").value = s; } catch(e) {}
   renderGomi();
-}
-let gomiBodyOpen = false;
-function toggleGomi() {
-  gomiBodyOpen = !gomiBodyOpen;
-  const body   = document.getElementById("gomi-body");
-  const hint   = document.getElementById("gomi-expand-hint");
-  body.style.display = gomiBodyOpen ? "" : "none";
-  hint.textContent   = gomiBodyOpen ? "▲ 閉じる" : "▼ 直近3日と詳細を見る";
 }
 initGomi();
 </script>
@@ -718,29 +621,6 @@ window.toggleCard = (id) => {
   det.classList.toggle("open");
 };
 
-// ── ごみ収集ステータス描画 ──
-function renderGomiStatus(d) {
-  const isOpen = d.status !== "closed";
-  const card   = document.getElementById("gomi-card");
-  card.className = "gomi-card " + (isOpen ? "open" : "closed");
-
-  const badge = document.getElementById("gomi-status-badge");
-  badge.textContent = isOpen ? "稼働中" : "停止中";
-  badge.className   = "badge " + (isOpen ? "badge-open" : "badge-closed");
-
-  const detail = document.getElementById("gomi-status-detail");
-  if (!isOpen && (d.period || d.reason || d.reopen_mode)) {
-    let rows = "";
-    if (d.period) rows += `<dt>停止期間</dt><dd>${FS.esc(d.period)}</dd>`;
-    if (d.reason) rows += `<dt>停止理由</dt><dd>${FS.esc(d.reason)}</dd>`;
-    const re = FS.fmtReopen(d); if (re) rows += `<dt>再開予定</dt><dd>${FS.esc(re)}</dd>`;
-    detail.innerHTML = `<dl>${rows}</dl>`;
-    detail.style.display = rows ? "" : "none";
-  } else {
-    detail.style.display = "none";
-    detail.innerHTML = "";
-  }
-}
 
 // ステータスデータを保持してシート表示に使う
 const statusData = {};
@@ -759,7 +639,7 @@ function renderStatus(id, d) {
     bcol.innerHTML = `<span class="badge badge-closed"><span class="bdot"></span>停止中</span>`;
   } else if (isNotice) {
     bcol.innerHTML = `<span class="badge badge-open"><span class="bdot"></span>稼働中</span>
-      <span class="notice-pill"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>予告あり</span>`;
+      <span class="notice-pill"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>予告</span>`;
   } else {
     bcol.innerHTML = `<span class="badge badge-open"><span class="bdot"></span>稼働中</span>`;
   }
@@ -787,7 +667,12 @@ window.openSheet = (id) => {
   }
 
   const body = document.getElementById("sheet-body");
-  body.innerHTML = statusBar + SHEET_CONTENT[id];
+  const content = id === "gomi" ? buildGomiSheetHTML() : SHEET_CONTENT[id];
+  body.innerHTML = statusBar + content;
+  if (id === "gomi") {
+    const key = (() => { try { return localStorage.getItem("yomitan_gomi_area_v1") || "1"; } catch(e) { return "1"; } })();
+    renderSheetGomiCards(key);
+  }
   document.getElementById("sheet-title").textContent = SHEET_TITLES[id] || "";
   document.getElementById("sheet-overlay").classList.add("open");
   document.getElementById("sheet-panel").classList.add("open");
@@ -862,7 +747,7 @@ function renderAll() {
   const now = Date.now();
   IDS.forEach(id => {
     const d = FS.effective(manual[id], scheds[id], now);
-    if (id === "gomi") renderGomiStatus(d); else renderStatus(id, d);
+    renderStatus(id, d);
   });
   renderSummary();
 }
@@ -926,9 +811,70 @@ setInterval(renderAll, 30000);
 <script>
 // シートのコンテンツ定義
 const SHEET_TITLES = {
+  gomi:    "ごみ収集日　直近3日と案内",
   kusaki:  "草木資源化施設　利用案内",
   conveni: "コンビニ交付　利用案内",
 };
+
+// ごみシートのHTML（エリア選択＋3日表示＋PDF＋台風）
+function buildGomiSheetHTML() {
+  const key = (() => { try { return localStorage.getItem("yomitan_gomi_area_v1") || "1"; } catch(e) { return "1"; } })();
+  const areaOptions = [
+    ["1",  "① 高志保(1)・長浜(1)"],
+    ["2",  "② 波平(1)・上地・高志保(2)・座喜味(3)"],
+    ["3",  "③ 長浜(2)・瀬名波・渡慶次・儀間・宇座"],
+    ["4a", "④-1 座喜味(1)（県営波平団地含）"],
+    ["4b", "④-2 楚辺・波平(2)・座喜味(2)・都屋"],
+    ["5",  "⑤ 渡具知・古堅・大湾・比謝・比謝矼・伊良皆(1)・大木(1)"],
+    ["6",  "⑥ 喜名・横田・親志・座喜味(トーガー地域/シーレイク)・伊良皆(2)・大木(2)"],
+  ];
+  const opts = areaOptions.map(([v,l]) =>
+    `<option value="${v}"${v===key?" selected":""}>${l}</option>`).join("");
+  return `
+    <h3>エリアを選択</h3>
+    <select class="gomi-select" id="sheet-area-sel" onchange="onSheetAreaChange(this.value)">
+      ${opts}
+    </select>
+    <div id="sheet-gomi-cards"></div>
+    <h3>ご案内</h3>
+    <div class="gomi-notes">
+      <div class="gomi-note-row"><span class="gomi-note-icon">🕗</span><span>収集日の<strong>朝8時30分まで</strong>に門前へ出してください</span></div>
+      <div class="gomi-note-row"><span class="gomi-note-icon">📄</span><a href="https://cccc.backshelf.jp/bookview/?filseq=12401&page=1" target="_blank">ごみの分け方・出し方（PDF）</a></div>
+      <div class="gomi-note-row">
+        <button class="gomi-typhoon-toggle" onclick="toggleTyphoon()">
+          <span>🌀</span><span id="typhoon-toggle-label">台風時のごみ出しについて ▼</span>
+        </button>
+      </div>
+      <div id="typhoon-body" class="gomi-typhoon-body" style="display:none;">
+        <p>「暴風警報」発令中、または業務中に「暴風警報」が発令される見込みで危険性がある場合は、ごみの収集を停止します。</p>
+        <p>朝8時30分までに「暴風警報」が解除されていない場合は、次回のごみ出しの日にお願いします。</p>
+        <p>※ 暴風警報が発令されていない場合でも、ごみが飛散しないよう各自で対策をお願いします。</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderSheetGomiCards(key) {
+  const container = document.getElementById("sheet-gomi-cards");
+  if (!container) return;
+  const days = getNext3(key);
+  container.innerHTML = days.map(({ date, items, isToday, isTomorrow }) => {
+    const label = `${MON_JA[date.getMonth()]}${date.getDate()}日（${DOW_JA[date.getDay()]}）`;
+    const badge = isToday    ? '<span class="gomi-today">今日</span>'
+                : isTomorrow ? '<span class="gomi-tomorrow">明日</span>' : '';
+    const tags = items.map(i => `<span class="gomi-tag ${i.c}">${i.l}</span>`).join("");
+    return `<div class="gomi-day-card"><span class="gomi-day-label">${label}</span>${badge}<div class="gomi-tags">${tags}</div></div>`;
+  }).join("");
+}
+
+window.onSheetAreaChange = (val) => {
+  try { localStorage.setItem("yomitan_gomi_area_v1", val); } catch(e) {}
+  // カード側の今日表示も更新
+  document.getElementById("area-sel") && (document.getElementById("area-sel").value = val);
+  renderGomi();
+  renderSheetGomiCards(val);
+};
+
 const SHEET_CONTENT = {
   kusaki: `
     <h3>施設について</h3>
